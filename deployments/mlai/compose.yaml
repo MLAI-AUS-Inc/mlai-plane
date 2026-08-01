@@ -1,0 +1,239 @@
+x-app-environment: &app-environment
+  WEB_URL: ${WEB_URL:?WEB_URL is required}
+  # Plane appends /spaces and /god-mode itself. Keeping these as origins also
+  # prevents a stale env file from producing duplicated base paths.
+  APP_BASE_URL: ${WEB_URL:?WEB_URL is required}
+  SPACE_BASE_URL: ${WEB_URL:?WEB_URL is required}
+  ADMIN_BASE_URL: ${WEB_URL:?WEB_URL is required}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS is required}
+  DEBUG: ${DEBUG:-0}
+  GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+  PLANE_TELEMETRY_ENABLED: ${PLANE_TELEMETRY_ENABLED:-0}
+  ENABLE_SIGNUP: ${ENABLE_SIGNUP:-0}
+  DISABLE_WORKSPACE_CREATION: ${DISABLE_WORKSPACE_CREATION:-1}
+  ENABLE_MAGIC_LINK_LOGIN: ${ENABLE_MAGIC_LINK_LOGIN:-0}
+  ENABLE_EMAIL_PASSWORD: ${ENABLE_EMAIL_PASSWORD:-1}
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+  AMQP_URL: ${AMQP_URL:?AMQP_URL is required}
+  SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+  LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY:?LIVE_SERVER_SECRET_KEY is required}
+  SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-__Host-plane-session}
+  SESSION_COOKIE_AGE: ${SESSION_COOKIE_AGE:-604800}
+  SESSION_SAVE_EVERY_REQUEST: ${SESSION_SAVE_EVERY_REQUEST:-0}
+  USE_MINIO: ${USE_MINIO:-0}
+  MINIO_ENDPOINT_SSL: ${MINIO_ENDPOINT_SSL:-1}
+  AWS_REGION: ${AWS_REGION:-ap-southeast-2}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}
+  AWS_S3_ENDPOINT_URL: ${AWS_S3_ENDPOINT_URL:-}
+  AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:?AWS_S3_BUCKET_NAME is required}
+  FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-10485760}
+  API_KEY_RATE_LIMIT: ${API_KEY_RATE_LIMIT:-60/minute}
+  AUTHENTICATION_RATE_LIMIT: ${AUTHENTICATION_RATE_LIMIT:-10/minute}
+  WEBHOOK_ALLOWED_IPS: ${WEBHOOK_ALLOWED_IPS:-}
+  WEBHOOK_ALLOWED_HOSTS: ${WEBHOOK_ALLOWED_HOSTS:-}
+
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+
+services:
+  web:
+    <<: [*restart-policy, *logging]
+    image: ${PLANE_FRONTEND_IMAGE:?PLANE_FRONTEND_IMAGE is required}
+    depends_on:
+      - api
+      - worker
+
+  space:
+    <<: [*restart-policy, *logging]
+    image: ${PLANE_SPACE_IMAGE:?PLANE_SPACE_IMAGE is required}
+    depends_on:
+      - api
+      - worker
+      - web
+
+  admin:
+    <<: [*restart-policy, *logging]
+    image: ${PLANE_ADMIN_IMAGE:?PLANE_ADMIN_IMAGE is required}
+    depends_on:
+      - api
+      - web
+
+  live:
+    <<: [*restart-policy, *logging]
+    image: ${PLANE_LIVE_IMAGE:?PLANE_LIVE_IMAGE is required}
+    environment:
+      API_BASE_URL: http://api:8000
+      LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY:?LIVE_SERVER_SECRET_KEY is required}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+    depends_on:
+      - api
+      - web
+
+  api:
+    <<: [*restart-policy, *logging]
+    image: ${PLANE_BACKEND_IMAGE:?PLANE_BACKEND_IMAGE is required}
+    command: ./bin/docker-entrypoint-api.sh
+    environment: *app-environment
+    depends_on:
+      instance-bootstrap:
+        condition: service_completed_successfully
+    volumes:
+      - logs_api:/code/plane/logs
+
+  worker:
+    <<: [*restart-policy, *logging]
+    image: ${PLANE_BACKEND_IMAGE:?PLANE_BACKEND_IMAGE is required}
+    command: ./bin/docker-entrypoint-worker.sh
+    environment: *app-environment
+    depends_on:
+      instance-bootstrap:
+        condition: service_completed_successfully
+    volumes:
+      - logs_worker:/code/plane/logs
+
+  beat-worker:
+    <<: [*restart-policy, *logging]
+    image: ${PLANE_BACKEND_IMAGE:?PLANE_BACKEND_IMAGE is required}
+    command: ./bin/docker-entrypoint-beat.sh
+    environment: *app-environment
+    depends_on:
+      instance-bootstrap:
+        condition: service_completed_successfully
+    volumes:
+      - logs_beat_worker:/code/plane/logs
+
+  migrator:
+    <<: *logging
+    image: ${PLANE_BACKEND_IMAGE:?PLANE_BACKEND_IMAGE is required}
+    command: ./bin/docker-entrypoint-migrator.sh
+    restart: "no"
+    environment: *app-environment
+    volumes:
+      - logs_migrator:/code/plane/logs
+
+  instance-bootstrap:
+    <<: *logging
+    image: ${PLANE_BACKEND_IMAGE:?PLANE_BACKEND_IMAGE is required}
+    restart: "no"
+    environment: *app-environment
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      plane-minio:
+        condition: service_healthy
+        required: false
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        python manage.py wait_for_db
+        python manage.py wait_for_migrations
+        python manage.py shell -c "import os, secrets; from django.utils import timezone; from plane.license.models import Instance, InstanceEdition; enabled = os.environ.get('PLANE_TELEMETRY_ENABLED', '0') == '1'; instance, _ = Instance.objects.get_or_create(defaults={'instance_name': 'Plane Community Edition', 'instance_id': secrets.token_hex(12), 'current_version': '1.4.0', 'latest_version': 'v1.4.0', 'last_checked_at': timezone.now(), 'is_telemetry_enabled': enabled, 'edition': InstanceEdition.PLANE_COMMUNITY.value}); instance.is_telemetry_enabled = enabled; instance.save(update_fields=['is_telemetry_enabled'])"
+        python manage.py configure_instance
+
+  proxy:
+    <<: [*restart-policy, *logging]
+    image: ${PLANE_PROXY_IMAGE:?PLANE_PROXY_IMAGE is required}
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?APP_DOMAIN is required}
+      BUCKET_NAME: ${AWS_S3_BUCKET_NAME:?AWS_S3_BUCKET_NAME is required}
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-10485760}
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-0.0.0.0/0}
+    ports:
+      - 127.0.0.1:${LISTEN_HTTP_PORT:-8080}:80
+    volumes:
+      - proxy_config:/config
+      - proxy_data:/data
+    depends_on:
+      - web
+      - api
+      - space
+      - admin
+      - live
+
+  plane-db:
+    profiles: [bundled]
+    <<: [*restart-policy, *logging]
+    image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE is required}
+    command: postgres -c max_connections=1000
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-plane}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-plane}
+      PGDATA: ${PGDATA:-/var/lib/postgresql/data}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  plane-redis:
+    profiles: [bundled]
+    <<: [*restart-policy, *logging]
+    image: ${VALKEY_IMAGE:?VALKEY_IMAGE is required}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: [CMD, valkey-cli, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  plane-mq:
+    profiles: [bundled]
+    <<: [*restart-policy, *logging]
+    image: ${RABBITMQ_IMAGE:?RABBITMQ_IMAGE is required}
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-plane}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-plane}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+
+  plane-minio:
+    profiles: [bundled]
+    <<: [*restart-policy, *logging]
+    image: ${MINIO_IMAGE:?MINIO_IMAGE is required}
+    command: server /export --console-address :9090
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}
+    volumes:
+      - uploads:/export
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mc alias set local http://127.0.0.1:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null && mc ready local
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitmq_data:
+  uploads:
+  logs_api:
+  logs_worker:
+  logs_beat_worker:
+  logs_migrator:
+  proxy_config:
+  proxy_data:
