@@ -1,0 +1,13 @@
+# Copy outside the repository, replace the tunnel identifiers, and keep the
+# credentials file mode-restricted. The Host rewrite is a security and
+# correctness invariant: Plane signs uploads and builds OAuth callbacks from
+# request.get_host().
+tunnel: REPLACE_WITH_STAGING_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_STAGING_TUNNEL_UUID.json
+
+ingress:
+  - hostname: plane-origin-staging.mlai.au
+    service: http://127.0.0.1:8080
+    originRequest:
+      httpHostHeader: plane-staging.mlai.au
+  - service: http_status:404
