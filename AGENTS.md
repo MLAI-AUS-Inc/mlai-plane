@@ -1,5 +1,14 @@
 # Agent Development Guide
 
+This checkout is MLAI's Plane fork. Read [`MLAI.md`](MLAI.md) before working on
+MLAI deployment, authentication, branding, or integration behavior. Upstream
+Plane documentation remains authoritative for unmodified product internals;
+MLAI documentation is authoritative for the fork and its deployment boundary.
+
+Never create, run, or apply a database migration without explicit approval for
+that specific migration. Treat setup scripts, tests, and container startup that
+apply migrations indirectly as migration commands.
+
 ## Commands
 
 - `pnpm dev` - Start all dev servers (web:3000, admin:3001)

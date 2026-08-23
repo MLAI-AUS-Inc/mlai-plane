@@ -69,6 +69,10 @@ Getting started with Plane is simple. Choose the setup that works best for you:
 
 See [CONTRIBUTING](./CONTRIBUTING.md)
 
+MLAI engineers working on the `admin.mlai.au` deployment must also read
+[`MLAI.md`](MLAI.md). It describes the fork boundary, repository relationship,
+and MLAI-specific onboarding rules that are not part of upstream Plane.
+
 ## ⚙️ Built with
 
 [![React Router](https://img.shields.io/badge/-React%20Router-CA4245?logo=react-router&style=for-the-badge&logoColor=white)](https://reactrouter.com/)

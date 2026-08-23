@@ -34,6 +34,20 @@ This helps us triage and manage issues more efficiently.
 
 ## Projects setup and Architecture
 
+### MLAI fork context
+
+This checkout is MLAI's Plane fork. For work intended for MLAI's deployment,
+clone the MLAI repository and read [`MLAI.md`](MLAI.md):
+
+```bash
+git clone https://github.com/MLAI-AUS-Inc/mlai-plane.git
+cd mlai-plane
+```
+
+Clone `makeplane/plane` only when contributing directly to upstream Plane.
+Confirm the intended contribution destination before creating a branch or pull
+request.
+
 ### Requirements
 
 - Docker Engine installed and running
@@ -50,15 +64,24 @@ The project is a monorepo, with backend api and frontend in a single repo.
 
 The backend is a django project which is kept inside apps/api
 
-1. Clone the repo
+1. Clone the repository for your intended contribution destination. For MLAI
+   work, use:
 
 ```bash
-git clone https://github.com/makeplane/plane.git [folder-name]
-cd [folder-name]
+git clone https://github.com/MLAI-AUS-Inc/mlai-plane.git
+cd mlai-plane
 chmod +x setup.sh
 ```
 
 2. Run setup.sh
+
+`./setup.sh` prepares environment files and dependencies; it does not apply a
+database migration. The Compose stack in the next step includes a dedicated
+`migrator` service that runs Django migrations.
+
+> **Migration approval required:** inspect the exact pending migration set and
+> obtain explicit approval before starting the Compose stack. A local or
+> disposable database does not imply approval.
 
 ```bash
 ./setup.sh
