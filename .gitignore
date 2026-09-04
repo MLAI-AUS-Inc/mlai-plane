@@ -117,3 +117,13 @@ packages/i18n/src/types/keys.generated.ts
 
 # Local security notes (not for version control)
 /security/
+
+# MLAI deployment secrets and Terraform local state
+deploy/mlai/.env
+deploy/mlai/terraform/*.tfstate
+deploy/mlai/terraform/*.tfstate.*
+deploy/mlai/terraform/*.tfplan
+deploy/mlai/terraform/.terraform/
+deploy/mlai/terraform/backend.hcl
+deploy/mlai/terraform/*.auto.tfvars
+deploy/mlai/terraform/*.auto.tfvars.json

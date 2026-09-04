@@ -1,0 +1,212 @@
+name: Deploy MLAI Plane without migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [staging, production]
+      source_sha:
+        description: Full 40-character commit SHA whose images should be deployed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: mlai-plane-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: ${{ format('{0}-deployment', inputs.environment) }}
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      PLANE_HOST: ${{ vars.PLANE_HOST }}
+      PLANE_SSH_HOST_KEY: ${{ vars.PLANE_SSH_HOST_KEY }}
+      APP_DOMAIN: ${{ vars.PLANE_APP_DOMAIN }}
+      SECRET_KEY: ${{ secrets.PLANE_SECRET_KEY }}
+      LIVE_SERVER_SECRET_KEY: ${{ secrets.PLANE_LIVE_SERVER_SECRET_KEY }}
+      POSTGRES_PASSWORD: ${{ secrets.PLANE_POSTGRES_PASSWORD }}
+      RABBITMQ_PASSWORD: ${{ secrets.PLANE_RABBITMQ_PASSWORD }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.PLANE_MINIO_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.PLANE_MINIO_SECRET_KEY }}
+      CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.PLANE_CLOUDFLARE_TUNNEL_TOKEN }}
+    steps:
+      - name: Validate immutable release and target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'source_sha must be a full lowercase commit SHA' >&2
+            exit 1
+          }
+          [[ "$APP_DOMAIN" =~ ^[a-z0-9.-]+$ ]] || {
+            echo 'PLANE_APP_DOMAIN must be a hostname' >&2
+            exit 1
+          }
+          if [[ "${{ inputs.environment }}" == "staging" && "$APP_DOMAIN" != "plane-staging.mlai.au" ]]; then
+            echo 'Staging must use plane-staging.mlai.au' >&2
+            exit 1
+          fi
+          if [[ "${{ inputs.environment }}" == "production" && "$APP_DOMAIN" != "admin.mlai.au" ]]; then
+            echo 'Production must use admin.mlai.au' >&2
+            exit 1
+          fi
+          for value in \
+            "$SECRET_KEY" "$LIVE_SERVER_SECRET_KEY" "$POSTGRES_PASSWORD" \
+            "$RABBITMQ_PASSWORD" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY"; do
+            [[ "$value" =~ ^[A-Za-z0-9_-]{24,}$ ]] || {
+              echo 'Application secrets must be at least 24 URL-safe characters' >&2
+              exit 1
+            }
+          done
+          [[ "$CLOUDFLARE_TUNNEL_TOKEN" =~ ^[A-Za-z0-9._-]{80,}$ ]] || {
+            echo 'The Cloudflare Tunnel token is missing or malformed' >&2
+            exit 1
+          }
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Require a release from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main || {
+            echo 'source_sha must be reachable from origin/main' >&2
+            exit 1
+          }
+
+      - uses: docker/setup-buildx-action@v3
+      - name: Authenticate image lookup
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Resolve commit images to immutable digests
+        id: images
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in frontend admin space live backend proxy; do
+            image="ghcr.io/mlai-aus-inc/mlai-plane-${name}:sha-${SOURCE_SHA}"
+            digest="$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' | jq -r '.digest')"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              echo "Could not resolve immutable digest for $image" >&2
+              exit 1
+            }
+            echo "${name}=${image%:*}@${digest}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Render protected host environment
+        env:
+          PLANE_FRONTEND_IMAGE: ${{ steps.images.outputs.frontend }}
+          PLANE_ADMIN_IMAGE: ${{ steps.images.outputs.admin }}
+          PLANE_SPACE_IMAGE: ${{ steps.images.outputs.space }}
+          PLANE_LIVE_IMAGE: ${{ steps.images.outputs.live }}
+          PLANE_BACKEND_IMAGE: ${{ steps.images.outputs.backend }}
+          PLANE_PROXY_IMAGE: ${{ steps.images.outputs.proxy }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          values = {
+              "PLANE_FRONTEND_IMAGE": os.environ["PLANE_FRONTEND_IMAGE"],
+              "PLANE_ADMIN_IMAGE": os.environ["PLANE_ADMIN_IMAGE"],
+              "PLANE_SPACE_IMAGE": os.environ["PLANE_SPACE_IMAGE"],
+              "PLANE_LIVE_IMAGE": os.environ["PLANE_LIVE_IMAGE"],
+              "PLANE_BACKEND_IMAGE": os.environ["PLANE_BACKEND_IMAGE"],
+              "PLANE_PROXY_IMAGE": os.environ["PLANE_PROXY_IMAGE"],
+              "APP_DOMAIN": os.environ["APP_DOMAIN"],
+              "WEB_URL": f"https://{os.environ['APP_DOMAIN']}",
+              "CORS_ALLOWED_ORIGINS": f"https://{os.environ['APP_DOMAIN']}",
+              "SECRET_KEY": os.environ["SECRET_KEY"],
+              "LIVE_SERVER_SECRET_KEY": os.environ["LIVE_SERVER_SECRET_KEY"],
+              "POSTGRES_USER": "plane",
+              "POSTGRES_PASSWORD": os.environ["POSTGRES_PASSWORD"],
+              "POSTGRES_DB": "plane",
+              "RABBITMQ_USER": "plane",
+              "RABBITMQ_PASSWORD": os.environ["RABBITMQ_PASSWORD"],
+              "RABBITMQ_VHOST": "plane",
+              "AWS_ACCESS_KEY_ID": os.environ["AWS_ACCESS_KEY_ID"],
+              "AWS_SECRET_ACCESS_KEY": os.environ["AWS_SECRET_ACCESS_KEY"],
+              "AWS_S3_BUCKET_NAME": "uploads",
+              "FILE_SIZE_LIMIT": "5242880",
+              "API_KEY_RATE_LIMIT": "60/minute",
+              "AUTHENTICATION_RATE_LIMIT": "10/minute",
+              "GUNICORN_WORKERS": "2",
+              "WEBHOOK_ALLOWED_IPS": "",
+              "WEBHOOK_ALLOWED_HOSTS": "",
+              "CLOUDFLARE_TUNNEL_TOKEN": os.environ["CLOUDFLARE_TUNNEL_TOKEN"],
+              "PLANE_MIGRATION_APPROVAL": "",
+          }
+          Path("/tmp/mlai-plane.env").write_text(
+              "".join(f"{key}={value}\n" for key, value in values.items()),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Install SSH identity and pinned host key
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.PLANE_SSH_KEY }}
+      - name: Validate and install pinned host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$PLANE_HOST" && -n "$PLANE_SSH_HOST_KEY" ]]
+          read -r key_host key_type key_data extra <<< "$PLANE_SSH_HOST_KEY"
+          [[ "$key_host" == "$PLANE_HOST" && "$key_type" == "ssh-ed25519" && -n "$key_data" && -z "${extra:-}" ]]
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$PLANE_SSH_HOST_KEY" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+          ssh-keygen -F "$PLANE_HOST" -f ~/.ssh/known_hosts >/dev/null
+
+      - name: Authenticate the host to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | ssh "root@$PLANE_HOST" \
+            docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+
+      - name: Install deployment profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh "root@$PLANE_HOST" 'install -d -m 0750 /opt/mlai-plane'
+          rsync -az --delete --exclude .env deploy/mlai/ "root@$PLANE_HOST:/opt/mlai-plane/"
+          scp -q /tmp/mlai-plane.env "root@$PLANE_HOST:/opt/mlai-plane/.env.pending"
+          ssh "root@$PLANE_HOST" '
+            chmod 0600 /opt/mlai-plane/.env.pending
+            mv /opt/mlai-plane/.env.pending /opt/mlai-plane/.env
+            cd /opt/mlai-plane
+            ./run.sh deploy
+          '
+
+      - name: Verify public route
+        shell: bash
+        run: curl --fail --silent --show-error --location --max-time 45 "https://$APP_DOMAIN/" >/dev/null
+
+      - name: Remove rendered credentials
+        if: always()
+        shell: bash
+        run: |
+          shred -u /tmp/mlai-plane.env 2>/dev/null || true
+          ssh "root@$PLANE_HOST" 'docker logout ghcr.io >/dev/null 2>&1 || true' || true

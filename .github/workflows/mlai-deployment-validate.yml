@@ -1,0 +1,42 @@
+name: Validate MLAI Plane deployment
+
+on:
+  pull_request:
+    paths:
+      - "deploy/mlai/**"
+      - ".github/workflows/mlai-*.yml"
+  push:
+    branches: [main]
+    paths:
+      - "deploy/mlai/**"
+      - ".github/workflows/mlai-*.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate scripts
+        run: bash -n deploy/mlai/run.sh
+      - name: Validate migration isolation and secret templates
+        run: |
+          grep -Fq 'profiles: [migration]' deploy/mlai/compose.yml
+          grep -Fq 'PLANE_MIGRATION_APPROVAL' deploy/mlai/run.sh
+          if grep -RIE '(dop_v1_|CLOUDFLARE_TUNNEL_TOKEN=[^r]|POSTGRES_PASSWORD=[^r])' deploy/mlai; then
+            echo 'A deployment credential appears to be committed.' >&2
+            exit 1
+          fi
+      - name: Parse Compose configuration
+        run: docker compose --env-file deploy/mlai/.env.example -f deploy/mlai/compose.yml config --quiet
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Validate Terraform
+        run: |
+          terraform -chdir=deploy/mlai/terraform fmt -check -diff
+          terraform -chdir=deploy/mlai/terraform init -backend=false -input=false
+          terraform -chdir=deploy/mlai/terraform validate
+

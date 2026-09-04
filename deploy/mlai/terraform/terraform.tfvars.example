@@ -1,0 +1,8 @@
+environment               = "staging"
+region                    = "syd1"
+size                      = "s-4vcpu-8gb"
+enable_backups            = false
+ssh_key_fingerprints      = ["replace-with-digitalocean-ssh-key-fingerprint"]
+ssh_source_cidrs          = ["replace-with-operator-or-runner-cidr"]
+allow_public_key_only_ssh = false
+
