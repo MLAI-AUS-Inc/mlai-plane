@@ -1,0 +1,225 @@
+x-db-env: &db-env
+  PGHOST: plane-db
+  PGDATABASE: ${POSTGRES_DB:?set POSTGRES_DB}
+  POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+  POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+  POSTGRES_PORT: "5432"
+  PGDATA: /var/lib/postgresql/data
+
+x-redis-env: &redis-env
+  REDIS_HOST: plane-redis
+  REDIS_PORT: "6379"
+  REDIS_URL: redis://plane-redis:6379/
+
+x-storage-env: &storage-env
+  USE_MINIO: "1"
+  AWS_REGION: auto
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+  AWS_S3_ENDPOINT_URL: http://plane-minio:9000
+  AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-uploads}
+  MINIO_ENDPOINT_SSL: "0"
+
+x-app-env: &app-env
+  WEB_URL: ${WEB_URL:?set WEB_URL}
+  DEBUG: "0"
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS}
+  GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+  DATABASE_URL: postgresql://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@plane-db:5432/${POSTGRES_DB:?set POSTGRES_DB}
+  SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+  AMQP_URL: amqp://${RABBITMQ_USER:?set RABBITMQ_USER}:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@plane-mq:5672/${RABBITMQ_VHOST:-plane}
+  API_KEY_RATE_LIMIT: ${API_KEY_RATE_LIMIT:-60/minute}
+  AUTHENTICATION_RATE_LIMIT: ${AUTHENTICATION_RATE_LIMIT:-10/minute}
+  LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY:?set LIVE_SERVER_SECRET_KEY}
+  WEBHOOK_ALLOWED_IPS: ${WEBHOOK_ALLOWED_IPS:-}
+  WEBHOOK_ALLOWED_HOSTS: ${WEBHOOK_ALLOWED_HOSTS:-}
+
+services:
+  web:
+    image: ${PLANE_FRONTEND_IMAGE:?set PLANE_FRONTEND_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+
+  admin:
+    image: ${PLANE_ADMIN_IMAGE:?set PLANE_ADMIN_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+
+  space:
+    image: ${PLANE_SPACE_IMAGE:?set PLANE_SPACE_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+
+  live:
+    image: ${PLANE_LIVE_IMAGE:?set PLANE_LIVE_IMAGE}
+    restart: unless-stopped
+    environment:
+      <<: *redis-env
+      API_BASE_URL: http://api:8000
+      LIVE_SERVER_SECRET_KEY: ${LIVE_SERVER_SECRET_KEY:?set LIVE_SERVER_SECRET_KEY}
+    depends_on:
+      plane-redis:
+        condition: service_started
+
+  api:
+    image: ${PLANE_BACKEND_IMAGE:?set PLANE_BACKEND_IMAGE}
+    restart: unless-stopped
+    command: ./bin/docker-entrypoint-api.sh
+    environment:
+      <<: [*app-env, *db-env, *redis-env, *storage-env]
+    volumes:
+      - logs_api:/code/plane/logs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          response = urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5);
+          assert response.status == 200;
+          assert json.load(response).get('status') == 'OK'
+      interval: 10s
+      timeout: 6s
+      retries: 18
+      start_period: 20s
+    depends_on:
+      plane-db:
+        condition: service_healthy
+      plane-redis:
+        condition: service_started
+      plane-mq:
+        condition: service_healthy
+      plane-minio:
+        condition: service_healthy
+
+  worker:
+    image: ${PLANE_BACKEND_IMAGE:?set PLANE_BACKEND_IMAGE}
+    restart: unless-stopped
+    command: ./bin/docker-entrypoint-worker.sh
+    environment:
+      <<: [*app-env, *db-env, *redis-env, *storage-env]
+    volumes:
+      - logs_worker:/code/plane/logs
+    depends_on:
+      api:
+        condition: service_healthy
+
+  beat-worker:
+    image: ${PLANE_BACKEND_IMAGE:?set PLANE_BACKEND_IMAGE}
+    restart: unless-stopped
+    command: ./bin/docker-entrypoint-beat.sh
+    environment:
+      <<: [*app-env, *db-env, *redis-env, *storage-env]
+    volumes:
+      - logs_beat_worker:/code/plane/logs
+    depends_on:
+      api:
+        condition: service_healthy
+
+  migrator:
+    image: ${PLANE_BACKEND_IMAGE:?set PLANE_BACKEND_IMAGE}
+    profiles: [migration]
+    restart: "no"
+    command: ./bin/docker-entrypoint-migrator.sh
+    environment:
+      <<: [*app-env, *db-env, *redis-env, *storage-env]
+    volumes:
+      - logs_migrator:/code/plane/logs
+    depends_on:
+      plane-db:
+        condition: service_healthy
+      plane-redis:
+        condition: service_started
+
+  plane-db:
+    image: postgres:15.7-alpine
+    restart: unless-stopped
+    command: postgres -c max_connections=300
+    environment:
+      <<: *db-env
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  plane-redis:
+    image: valkey/valkey:7.2.11-alpine
+    restart: unless-stopped
+    command: valkey-server --appendonly yes
+    volumes:
+      - redisdata:/data
+
+  plane-mq:
+    image: rabbitmq:3.13.6-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?set RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-plane}
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  plane-minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    restart: unless-stopped
+    command: server /export --console-address :9090
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    volumes:
+      - uploads:/export
+
+  proxy:
+    image: ${PLANE_PROXY_IMAGE:?set PLANE_PROXY_IMAGE}
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-5242880}
+      SITE_ADDRESS: :80
+      BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-uploads}
+      TRUSTED_PROXIES: 0.0.0.0/0
+    depends_on:
+      - web
+      - admin
+      - space
+      - live
+      - api
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.8.1
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - proxy
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitmq_data:
+  uploads:
+  logs_api:
+  logs_worker:
+  logs_beat_worker:
+  logs_migrator:

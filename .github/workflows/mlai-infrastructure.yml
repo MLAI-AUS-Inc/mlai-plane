@@ -1,0 +1,158 @@
+name: Plan or apply MLAI Plane infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [staging, production]
+      action:
+        description: Terraform action
+        required: true
+        type: choice
+        default: plan
+        options: [plan, apply]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mlai-plane-infrastructure-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: ${{ format('{0}-infrastructure-plan', inputs.environment) }}
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require main for infrastructure changes
+        if: inputs.action == 'apply'
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo 'Infrastructure apply is allowed only from main' >&2
+            exit 1
+          }
+      - uses: hashicorp/setup-terraform@v3
+      - name: Render backend and environment configuration
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_STATE_ENDPOINT: ${{ vars.TF_STATE_ENDPOINT }}
+          TF_STATE_REGION: ${{ vars.TF_STATE_REGION }}
+          TF_SSH_KEY_FINGERPRINTS: ${{ vars.TF_SSH_KEY_FINGERPRINTS }}
+          TF_SSH_SOURCE_CIDRS: ${{ vars.TF_SSH_SOURCE_CIDRS }}
+          TF_ALLOW_PUBLIC_SSH: ${{ vars.TF_ALLOW_PUBLIC_SSH }}
+          TF_DROPLET_SIZE: ${{ vars.TF_DROPLET_SIZE }}
+        run: |
+          set -euo pipefail
+          test -n "$TF_STATE_BUCKET"
+          test -n "$TF_STATE_ENDPOINT"
+          test -n "$TF_STATE_REGION"
+          test -n "$TF_SSH_KEY_FINGERPRINTS"
+          test -n "$TF_SSH_SOURCE_CIDRS"
+          test -n "$TF_DROPLET_SIZE"
+          cat > /tmp/backend.hcl <<EOF
+          bucket = "$TF_STATE_BUCKET"
+          key = "mlai-plane/${{ inputs.environment }}/terraform.tfstate"
+          region = "$TF_STATE_REGION"
+          endpoints = { s3 = "$TF_STATE_ENDPOINT" }
+          use_path_style = false
+          skip_credentials_validation = true
+          skip_region_validation = true
+          skip_requesting_account_id = true
+          skip_metadata_api_check = true
+          skip_s3_checksum = true
+          EOF
+          cat > /tmp/environment.auto.tfvars.json <<EOF
+          {
+            "environment": "${{ inputs.environment }}",
+            "region": "$TF_STATE_REGION",
+            "size": "$TF_DROPLET_SIZE",
+            "enable_backups": ${{ inputs.environment == 'production' }},
+            "ssh_key_fingerprints": $TF_SSH_KEY_FINGERPRINTS,
+            "ssh_source_cidrs": $TF_SSH_SOURCE_CIDRS,
+            "allow_public_key_only_ssh": $TF_ALLOW_PUBLIC_SSH
+          }
+          EOF
+          install -m 0600 /tmp/environment.auto.tfvars.json deploy/mlai/terraform/environment.auto.tfvars.json
+      - name: Initialize and create immutable plan
+        run: |
+          terraform -chdir=deploy/mlai/terraform init -backend-config=/tmp/backend.hcl
+          terraform -chdir=deploy/mlai/terraform fmt -check -diff
+          terraform -chdir=deploy/mlai/terraform validate
+          terraform -chdir=deploy/mlai/terraform plan -out=plane.tfplan
+          sha256sum deploy/mlai/terraform/plane.tfplan > deploy/mlai/terraform/plane.tfplan.sha256
+      - name: Preserve plan for protected apply
+        if: inputs.action == 'apply'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlai-plane-${{ inputs.environment }}-${{ github.sha }}-tfplan
+          path: |
+            deploy/mlai/terraform/plane.tfplan
+            deploy/mlai/terraform/plane.tfplan.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  apply:
+    if: inputs.action == 'apply'
+    needs: plan
+    runs-on: ubuntu-24.04
+    environment: ${{ format('{0}-infrastructure', inputs.environment) }}
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require the reviewed main commit
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo 'Infrastructure apply is allowed only from main' >&2
+            exit 1
+          }
+      - uses: hashicorp/setup-terraform@v3
+      - name: Render reviewed state backend
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_STATE_ENDPOINT: ${{ vars.TF_STATE_ENDPOINT }}
+          TF_STATE_REGION: ${{ vars.TF_STATE_REGION }}
+        run: |
+          set -euo pipefail
+          test -n "$TF_STATE_BUCKET"
+          test -n "$TF_STATE_ENDPOINT"
+          test -n "$TF_STATE_REGION"
+          cat > /tmp/backend.hcl <<EOF
+          bucket = "$TF_STATE_BUCKET"
+          key = "mlai-plane/${{ inputs.environment }}/terraform.tfstate"
+          region = "$TF_STATE_REGION"
+          endpoints = { s3 = "$TF_STATE_ENDPOINT" }
+          use_path_style = false
+          skip_credentials_validation = true
+          skip_region_validation = true
+          skip_requesting_account_id = true
+          skip_metadata_api_check = true
+          skip_s3_checksum = true
+          EOF
+          terraform -chdir=deploy/mlai/terraform init -backend-config=/tmp/backend.hcl
+      - name: Download the reviewed plan
+        uses: actions/download-artifact@v5
+        with:
+          name: mlai-plane-${{ inputs.environment }}-${{ github.sha }}-tfplan
+          path: deploy/mlai/terraform
+      - name: Apply the exact reviewed plan
+        run: |
+          sha256sum --check deploy/mlai/terraform/plane.tfplan.sha256
+          terraform -chdir=deploy/mlai/terraform apply plane.tfplan
