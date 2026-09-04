@@ -74,12 +74,24 @@ migrate() {
 deploy() {
   config
   compose pull
-  compose up -d --remove-orphans --no-build
+  compose up -d --remove-orphans --no-build --wait --wait-timeout 240
+  verify_api
+}
+
+verify_api() {
+  local api_id api_health
+  api_id="$(compose ps -q api)"
+  [[ -n "$api_id" ]] || die "API container is not running"
+  api_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$api_id")"
+  [[ "$api_health" == "healthy" ]] || die "API container is not healthy (status: $api_health)"
+  compose exec -T api python -c \
+    "import json, urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5); assert response.status == 200; assert json.load(response).get('status') == 'OK'"
 }
 
 smoke() {
   local url
   require_env_file
+  verify_api
   url="$(sed -n 's/^WEB_URL=//p' "$ENV_FILE" | tail -n 1)"
   [[ "$url" =~ ^https://[^/]+$ ]] || die "WEB_URL must be an HTTPS origin without a path"
   curl --fail --silent --show-error --location --max-time 30 "$url/" >/dev/null

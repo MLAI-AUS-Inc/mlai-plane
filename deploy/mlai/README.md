@@ -35,6 +35,8 @@ readiness gates pass.
 - The `staging-infrastructure` and `production-infrastructure` GitHub
   environments must require reviewers before `apply` is enabled.
 - Normal `run.sh deploy` excludes the Compose `migration` profile.
+- Deployment waits for the API container's health endpoint and fails closed if
+  the backend cannot start, including when migrations are pending.
 - No workflow currently applies a database migration.
 - `run.sh migrate` refuses to run unless the operator supplies the exact
   approval identifier stored in the protected environment file. This guard is

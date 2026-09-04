@@ -26,10 +26,7 @@ jobs:
         run: |
           grep -Fq 'profiles: [migration]' deploy/mlai/compose.yml
           grep -Fq 'PLANE_MIGRATION_APPROVAL' deploy/mlai/run.sh
-          if grep -RIE '(dop_v1_|CLOUDFLARE_TUNNEL_TOKEN=[^r]|POSTGRES_PASSWORD=[^r])' deploy/mlai; then
-            echo 'A deployment credential appears to be committed.' >&2
-            exit 1
-          fi
+          python3 deploy/mlai/validate-secret-templates.py
       - name: Parse Compose configuration
         run: docker compose --env-file deploy/mlai/.env.example -f deploy/mlai/compose.yml config --quiet
       - name: Set up Terraform
@@ -39,4 +36,3 @@ jobs:
           terraform -chdir=deploy/mlai/terraform fmt -check -diff
           terraform -chdir=deploy/mlai/terraform init -backend=false -input=false
           terraform -chdir=deploy/mlai/terraform validate
-

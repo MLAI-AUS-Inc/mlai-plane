@@ -76,6 +76,20 @@ services:
       <<: [*app-env, *db-env, *redis-env, *storage-env]
     volumes:
       - logs_api:/code/plane/logs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          response = urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5);
+          assert response.status == 200;
+          assert json.load(response).get('status') == 'OK'
+      interval: 10s
+      timeout: 6s
+      retries: 18
+      start_period: 20s
     depends_on:
       plane-db:
         condition: service_healthy
@@ -94,7 +108,7 @@ services:
       - logs_worker:/code/plane/logs
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
 
   beat-worker:
     image: ${PLANE_BACKEND_IMAGE:?set PLANE_BACKEND_IMAGE}
@@ -106,7 +120,7 @@ services:
       - logs_beat_worker:/code/plane/logs
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
 
   migrator:
     image: ${PLANE_BACKEND_IMAGE:?set PLANE_BACKEND_IMAGE}
