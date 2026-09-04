@@ -97,6 +97,8 @@ services:
         condition: service_started
       plane-mq:
         condition: service_healthy
+      plane-minio:
+        condition: service_healthy
 
   worker:
     image: ${PLANE_BACKEND_IMAGE:?set PLANE_BACKEND_IMAGE}
@@ -180,6 +182,12 @@ services:
     environment:
       MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
       MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     volumes:
       - uploads:/export
 

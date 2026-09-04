@@ -38,6 +38,9 @@ EXPECTED_WORKFLOW = {
         "AWS_SECRET_ACCESS_KEY": "${{ secrets.TF_STATE_SECRET_ACCESS_KEY }}",
     },
 }
+EXPECTED_WORKFLOW_COUNTS = {
+    Path(".github/workflows/mlai-infrastructure.yml"): 2,
+}
 
 SECRET_KEYS = set(EXPECTED_ENV) | {
     key for assignments in EXPECTED_WORKFLOW.values() for key in assignments
@@ -121,8 +124,11 @@ def validate_source(path: Path, errors: list[str]) -> None:
             errors.append(f"{relative}:{line_number}: unexpected literal secret assignment")
 
     for key, expected in EXPECTED_WORKFLOW.get(relative, {}).items():
-        if workflow_assignments[key] != [expected]:
-            errors.append(f"{relative}: {key} must occur once with its exact GitHub secret")
+        expected_count = EXPECTED_WORKFLOW_COUNTS.get(relative, 1)
+        if workflow_assignments[key] != [expected] * expected_count:
+            errors.append(
+                f"{relative}: {key} must occur {expected_count} time(s) with its exact GitHub secret"
+            )
 
 
 def main() -> int:

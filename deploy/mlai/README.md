@@ -63,11 +63,14 @@ digests before any operational command.
 
 ## GitHub configuration
 
-Create protected GitHub environments named `staging-infrastructure` and
-`production-infrastructure` for Terraform, plus `staging-deployment` and
-`production-deployment` for host rollout. Each must require reviewers.
+Create GitHub environments named `staging-infrastructure-plan` and
+`production-infrastructure-plan` for Terraform planning. Create protected
+`staging-infrastructure` and `production-infrastructure` environments for
+applying the resulting checksummed plan, plus `staging-deployment` and
+`production-deployment` for host rollout. Apply and deployment environments
+must require reviewers.
 
-The infrastructure environments need:
+Both the infrastructure plan and apply environments need:
 
 Secrets:
 
