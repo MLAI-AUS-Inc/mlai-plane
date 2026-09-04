@@ -81,7 +81,8 @@ subsequently fails. Generate and explicitly approve a new plan before retrying.
 
 ## GitHub configuration
 
-Create GitHub environments named `staging-infrastructure-plan` and
+Create a main-only `image-publishing` GitHub environment. Create environments
+named `staging-infrastructure-plan` and
 `production-infrastructure-plan` for Terraform planning. Create protected
 `staging-infrastructure` and `production-infrastructure` environments for
 applying the resulting checksummed plan, plus `staging-deployment` and
@@ -129,10 +130,13 @@ billable change and requires explicit approval.
 
 ## Images
 
-The **Build MLAI Plane images** workflow builds six `linux/amd64` images and
-publishes commit tags under `ghcr.io/mlai-aus-inc`. Deployment automation must
-resolve each commit tag to its registry digest and render those digests into the
-protected host `.env`; mutable tags are not accepted by `run.sh`.
+The **Build MLAI Plane images** workflow validates six `linux/amd64` images on
+pull requests without package-write permission. Only a push to `main`, through
+the main-only `image-publishing` environment, publishes commit tags under
+`ghcr.io/mlai-aus-inc`; manual dispatch is not enabled. Deployment automation
+hashes the registry's raw top-level manifest to resolve each tag to its content
+digest and renders those digests into the protected host `.env`; mutable tags
+are not accepted by `run.sh`.
 
 ## Tunnel configuration
 
