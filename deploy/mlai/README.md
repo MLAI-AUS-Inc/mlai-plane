@@ -86,9 +86,9 @@ Create GitHub environments named `staging-infrastructure-plan` and
 `staging-infrastructure` and `production-infrastructure` environments for
 applying the resulting checksummed plan, plus `staging-deployment` and
 `production-deployment` for host rollout. Apply and deployment environments
-must require reviewers. Every infrastructure-plan environment must use a custom
-deployment branch policy that permits only `main`; the workflow also rejects
-every non-`main` ref before scheduling its plan job.
+must require reviewers. Every environment named above must use a custom
+deployment branch policy that permits only `main`; both workflow entry jobs
+also reject every non-`main` ref before they can receive environment secrets.
 
 Both the infrastructure plan and apply environments need:
 

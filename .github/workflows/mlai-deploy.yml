@@ -23,6 +23,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: ${{ format('{0}-deployment', inputs.environment) }}
     env:
