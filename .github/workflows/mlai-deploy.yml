@@ -194,10 +194,8 @@ jobs:
           rsync -az --delete --exclude .env deploy/mlai/ "root@$PLANE_HOST:/opt/mlai-plane/"
           scp -q /tmp/mlai-plane.env "root@$PLANE_HOST:/opt/mlai-plane/.env.pending"
           ssh "root@$PLANE_HOST" '
-            chmod 0600 /opt/mlai-plane/.env.pending
-            mv /opt/mlai-plane/.env.pending /opt/mlai-plane/.env
             cd /opt/mlai-plane
-            ./run.sh deploy
+            ./run.sh deploy /opt/mlai-plane/.env.pending
           '
 
       - name: Verify public route

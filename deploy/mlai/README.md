@@ -38,13 +38,17 @@ readiness gates pass.
 - Deployment waits for the API container's health endpoint and fails closed if
   the backend cannot start, including when migrations are pending.
 - No workflow currently applies a database migration.
-- `run.sh migration-plan` hashes the immutable backend image, database volume
-  and PostgreSQL system identities, database name/user, and exact pending plan.
-  `run.sh migrate` refuses to run unless the operator argument and protected
-  environment value both match that hash, then consumes the approval
-  immediately before its single execution attempt. This guard is supplemental:
-  an operator still needs explicit approval for the exact plan and target
-  database.
+- `run.sh migration-plan` hashes the immutable backend image, effective Compose
+  configuration, database volume and PostgreSQL system identities, database
+  name/user, and exact pending plan. `run.sh migrate` refuses to run unless the
+  operator argument and protected environment value both match that hash, then
+  consumes the approval immediately before its single execution attempt.
+- Deployments and migration operations share an exclusive host lock. Migration
+  execution additionally uses private captured copies of the approved `.env`
+  and Compose definition, preventing a concurrent rollout from swapping the
+  image or target between validation and execution.
+- These guards are supplemental: an operator still needs explicit approval for
+  the exact plan and target database.
 - Application images must use full immutable `sha256` digests.
 - The DigitalOcean firewall accepts SSH only. Plane traffic enters through the
   outbound-only Tunnel.
@@ -82,7 +86,9 @@ Create GitHub environments named `staging-infrastructure-plan` and
 `staging-infrastructure` and `production-infrastructure` environments for
 applying the resulting checksummed plan, plus `staging-deployment` and
 `production-deployment` for host rollout. Apply and deployment environments
-must require reviewers.
+must require reviewers. Every infrastructure-plan environment must use a custom
+deployment branch policy that permits only `main`; the workflow also rejects
+every non-`main` ref before scheduling its plan job.
 
 Both the infrastructure plan and apply environments need:
 
