@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 import sys
 from pathlib import Path
+from typing import Any, Iterator
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,9 +51,6 @@ SECRET_KEYS = set(EXPECTED_ENV) | {
 DOTENV_ASSIGNMENT = re.compile(
     rf"^\s*(?:export\s+)?({'|'.join(sorted(SECRET_KEYS))})=(.*)$"
 )
-YAML_ASSIGNMENT = re.compile(
-    rf"^\s*({'|'.join(sorted(SECRET_KEYS))}):\s*(.*?)\s*$"
-)
 TOKEN_SIGNATURES = (
     re.compile(r"\bdop_v1_[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bdoo_v1_[A-Za-z0-9_-]{20,}\b"),
@@ -86,11 +86,87 @@ def validate_env_template(errors: list[str]) -> None:
             )
 
 
+def load_yaml(path: Path) -> Any:
+    """Parse YAML with Ruby's standard-library Psych implementation."""
+    parser = r'''
+require "json"
+require "yaml"
+
+document = YAML.safe_load(
+  File.read(ARGV.fetch(0)),
+  permitted_classes: [Symbol],
+  aliases: true,
+)
+STDOUT.write(JSON.generate(document))
+'''
+    result = subprocess.run(
+        ["ruby", "-e", parser, str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
+
+
+def values_for_key(node: Any, expected_key: str) -> Iterator[Any]:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if str(key) == expected_key:
+                yield value
+            yield from values_for_key(value, expected_key)
+    elif isinstance(node, list):
+        for value in node:
+            yield from values_for_key(value, expected_key)
+
+
+def validate_yaml_assignments(errors: list[str]) -> None:
+    compose_path = Path("deploy/mlai/compose.yml")
+    documents = sorted(
+        {compose_path}
+        | {
+            path.relative_to(ROOT)
+            for path in (ROOT / ".github/workflows").glob("mlai-*.yml")
+        }
+    )
+    parsed: dict[Path, Any] = {}
+
+    for relative in documents:
+        try:
+            parsed[relative] = load_yaml(ROOT / relative)
+        except (subprocess.CalledProcessError, json.JSONDecodeError) as error:
+            errors.append(f"{relative}: cannot parse YAML structurally: {error}")
+
+    if compose_path in parsed:
+        for key in EXPECTED_ENV.keys() - {"PLANE_MIGRATION_APPROVAL"}:
+            values = list(values_for_key(parsed[compose_path], key))
+            if not values:
+                continue
+            if any(
+                not isinstance(value, str) or not value.startswith(f"${{{key}:")
+                for value in values
+            ):
+                errors.append(f"{compose_path}: every {key} value must reference its Compose variable")
+
+    for relative in documents:
+        if relative == compose_path or relative not in parsed:
+            continue
+        expected_assignments = EXPECTED_WORKFLOW.get(relative, {})
+        expected_count = EXPECTED_WORKFLOW_COUNTS.get(relative, 1)
+        for key in sorted(SECRET_KEYS):
+            values = list(values_for_key(parsed[relative], key))
+            if key not in expected_assignments:
+                if values:
+                    errors.append(f"{relative}: unexpected secret assignment for {key}")
+                continue
+            expected = expected_assignments[key]
+            if values != [expected] * expected_count:
+                errors.append(
+                    f"{relative}: {key} must occur {expected_count} time(s) with its exact GitHub secret"
+                )
+
+
 def validate_source(path: Path, errors: list[str]) -> None:
     relative = path.relative_to(ROOT)
-    workflow_assignments: dict[str, list[str]] = {
-        key: [] for key in EXPECTED_WORKFLOW.get(relative, {})
-    }
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -107,33 +183,11 @@ def validate_source(path: Path, errors: list[str]) -> None:
                 f"{relative}:{line_number}: secret dotenv assignments are only allowed in .env.example"
             )
 
-        yaml_match = YAML_ASSIGNMENT.match(line)
-        if not yaml_match:
-            continue
-        key, value = yaml_match.groups()
-        if relative == Path("deploy/mlai/compose.yml"):
-            if not value.startswith(f"${{{key}:"):
-                errors.append(f"{relative}:{line_number}: {key} must reference its Compose variable")
-        elif relative in EXPECTED_WORKFLOW:
-            expected = EXPECTED_WORKFLOW[relative].get(key)
-            if expected is None or value != expected:
-                errors.append(f"{relative}:{line_number}: {key} must use its exact GitHub secret")
-            else:
-                workflow_assignments[key].append(value)
-        else:
-            errors.append(f"{relative}:{line_number}: unexpected literal secret assignment")
-
-    for key, expected in EXPECTED_WORKFLOW.get(relative, {}).items():
-        expected_count = EXPECTED_WORKFLOW_COUNTS.get(relative, 1)
-        if workflow_assignments[key] != [expected] * expected_count:
-            errors.append(
-                f"{relative}: {key} must occur {expected_count} time(s) with its exact GitHub secret"
-            )
-
 
 def main() -> int:
     errors: list[str] = []
     validate_env_template(errors)
+    validate_yaml_assignments(errors)
     for source in deployment_sources():
         validate_source(source, errors)
 

@@ -38,10 +38,13 @@ readiness gates pass.
 - Deployment waits for the API container's health endpoint and fails closed if
   the backend cannot start, including when migrations are pending.
 - No workflow currently applies a database migration.
-- `run.sh migrate` refuses to run unless the operator supplies the exact
-  approval identifier stored in the protected environment file. This guard is
-  supplemental: an operator still needs explicit approval for the exact
-  migration plan and target database.
+- `run.sh migration-plan` hashes the immutable backend image, database volume
+  and PostgreSQL system identities, database name/user, and exact pending plan.
+  `run.sh migrate` refuses to run unless the operator argument and protected
+  environment value both match that hash, then consumes the approval
+  immediately before its single execution attempt. This guard is supplemental:
+  an operator still needs explicit approval for the exact plan and target
+  database.
 - Application images must use full immutable `sha256` digests.
 - The DigitalOcean firewall accepts SSH only. Plane traffic enters through the
   outbound-only Tunnel.
@@ -60,6 +63,17 @@ terraform -chdir=deploy/mlai/terraform validate
 The example image digests are deliberately invalid for deployment. CI validates
 the Compose shape directly with the example file; `run.sh` rejects the sentinel
 digests before any operational command.
+
+## Migration approval protocol
+
+On the target host, `./run.sh migration-plan` prints the target snapshot and its
+`MIGRATION_APPROVAL_SHA256`. Obtain explicit approval for that complete output.
+Only after approval, store that exact hash as `PLANE_MIGRATION_APPROVAL` in the
+protected host `.env` and invoke `./run.sh migrate <approved-plan-sha256>` with
+the same value. The command recomputes the snapshot and fails if the image,
+database cluster, target settings, or pending plan changed. It clears the stored
+hash before its one permitted execution attempt, including when that attempt
+subsequently fails. Generate and explicitly approve a new plan before retrying.
 
 ## GitHub configuration
 

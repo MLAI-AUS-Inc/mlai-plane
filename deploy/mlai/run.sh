@@ -45,6 +45,19 @@ validate_placeholders() {
   fi
 }
 
+env_value() {
+  local key="$1"
+  sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1
+}
+
+sha256_text() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  else
+    shasum -a 256 | awk '{print $1}'
+  fi
+}
+
 config() {
   require_env_file
   validate_images
@@ -52,22 +65,61 @@ config() {
   compose config --quiet
 }
 
-migration_plan() {
+migration_snapshot() {
+  local backend_image database_name database_user db_id db_system_id db_volume plan
   config
-  compose --profile migration run --rm migrator python manage.py migrate --plan
+  backend_image="$(env_value PLANE_BACKEND_IMAGE)"
+  database_name="$(env_value POSTGRES_DB)"
+  database_user="$(env_value POSTGRES_USER)"
+  plan="$(compose --profile migration run --rm --no-TTY migrator python manage.py migrate --plan)"
+  db_id="$(compose ps -q plane-db)"
+  [[ -n "$db_id" ]] || die "database container is not running"
+  db_volume="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$db_id")"
+  [[ -n "$db_volume" ]] || die "database volume identity is unavailable"
+  db_system_id="$(
+    compose exec -T plane-db psql \
+      --username="$database_user" \
+      --dbname="$database_name" \
+      --tuples-only \
+      --no-align \
+      --command='SELECT system_identifier FROM pg_control_system();'
+  )"
+  [[ "$db_system_id" =~ ^[0-9]+$ ]] || die "database system identity is unavailable"
+  printf 'backend_image=%s\ndatabase_volume=%s\ndatabase_system_identifier=%s\ndatabase_user=%s\ndatabase_name=%s\nplan:\n%s\n' \
+    "$backend_image" "$db_volume" "$db_system_id" "$database_user" "$database_name" "$plan"
+}
+
+migration_plan() {
+  local snapshot approval
+  snapshot="$(migration_snapshot)"
+  approval="$(printf '%s' "$snapshot" | sha256_text)"
+  printf '%s\n\nMIGRATION_APPROVAL_SHA256=%s\n' "$snapshot" "$approval"
+}
+
+consume_migration_approval() {
+  local count temporary
+  count="$(grep -c '^PLANE_MIGRATION_APPROVAL=' "$ENV_FILE" || true)"
+  [[ "$count" == "1" ]] || die "PLANE_MIGRATION_APPROVAL must occur exactly once in $ENV_FILE"
+  temporary="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
+  chmod --reference="$ENV_FILE" "$temporary"
+  awk '/^PLANE_MIGRATION_APPROVAL=/{print "PLANE_MIGRATION_APPROVAL="; next} {print}' \
+    "$ENV_FILE" > "$temporary"
+  mv "$temporary" "$ENV_FILE"
 }
 
 migrate() {
-  local approval="${1:-}"
-  [[ -n "$approval" ]] || die "usage: run.sh migrate <exact-approved-change-id>"
+  local approval="${1:-}" configured_approval snapshot current_approval
+  [[ "$approval" =~ ^[0-9a-f]{64}$ ]] || die "usage: run.sh migrate <approved-plan-sha256>"
   require_env_file
-  # shellcheck disable=SC1090
-  set -a
-  source "$ENV_FILE"
-  set +a
-  [[ -n "${PLANE_MIGRATION_APPROVAL:-}" ]] || die "PLANE_MIGRATION_APPROVAL is not set"
-  [[ "$approval" == "$PLANE_MIGRATION_APPROVAL" ]] || die "migration approval does not match this target"
-  config
+  configured_approval="$(env_value PLANE_MIGRATION_APPROVAL)"
+  [[ "$configured_approval" =~ ^[0-9a-f]{64}$ ]] || die "PLANE_MIGRATION_APPROVAL is not an approved plan hash"
+  snapshot="$(migration_snapshot)"
+  current_approval="$(printf '%s' "$snapshot" | sha256_text)"
+  [[ "$approval" == "$configured_approval" ]] || die "operator approval does not match the protected target approval"
+  [[ "$approval" == "$current_approval" ]] || die "migration image, target, or plan changed after approval"
+  printf '%s\n' "$snapshot"
+  consume_migration_approval
+  printf 'Migration approval %s was consumed before execution.\n' "$approval"
   compose --profile migration run --rm migrator
 }
 
@@ -107,6 +159,6 @@ case "${1:-}" in
   logs) shift; compose logs "$@" ;;
   smoke) smoke ;;
   *)
-    die "usage: run.sh {config|pull|deploy|migration-plan|migrate <approval-id>|status|logs|smoke}"
+    die "usage: run.sh {config|pull|deploy|migration-plan|migrate <approved-plan-sha256>|status|logs|smoke}"
     ;;
 esac
