@@ -12,4 +12,8 @@ output "droplet_private_ipv4" {
   description = "Private VPC address for future MLAI service-to-service traffic."
   value       = digitalocean_droplet.plane.ipv4_address_private
 }
+output "project_id" {
+  description = "Dedicated DigitalOcean project for this Plane environment."
+  value       = digitalocean_project.plane.id
+}
 

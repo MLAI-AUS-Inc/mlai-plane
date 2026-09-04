@@ -31,6 +31,12 @@ readiness gates pass.
 
 ## Safety model
 
+- Terraform 1.12.2 is required locally and pinned in validation, plan and apply.
+- Each environment creates its own DigitalOcean project (`mlai-plane-staging`
+  or `mlai-plane-production`) and assigns only its Plane Droplet to that project.
+  The existing default project is not changed.
+- Each firewall attaches by its own Droplet ID, never by the shared application
+  tag. Staging and production cannot inherit each other's firewall rules.
 - Terraform validation runs automatically, but Terraform plan/apply is manual.
 - The `staging-infrastructure` and `production-infrastructure` GitHub
   environments must require reviewers before `apply` is enabled.
@@ -62,6 +68,7 @@ cp deploy/mlai/.env.example /tmp/mlai-plane.env
 docker compose --env-file /tmp/mlai-plane.env -f deploy/mlai/compose.yml config --quiet
 terraform -chdir=deploy/mlai/terraform init -backend=false
 terraform -chdir=deploy/mlai/terraform validate
+terraform -chdir=deploy/mlai/terraform test
 ```
 
 The example image digests are deliberately invalid for deployment. CI validates

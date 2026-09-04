@@ -44,6 +44,8 @@ jobs:
             exit 1
           }
       - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.2
       - name: Render backend and environment configuration
         env:
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
@@ -124,6 +126,8 @@ jobs:
             exit 1
           }
       - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.2
       - name: Render reviewed state backend
         env:
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}

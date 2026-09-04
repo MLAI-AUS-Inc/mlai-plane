@@ -31,8 +31,11 @@ jobs:
         run: docker compose --env-file deploy/mlai/.env.example -f deploy/mlai/compose.yml config --quiet
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.2
       - name: Validate Terraform
         run: |
           terraform -chdir=deploy/mlai/terraform fmt -check -diff
           terraform -chdir=deploy/mlai/terraform init -backend=false -input=false
           terraform -chdir=deploy/mlai/terraform validate
+          terraform -chdir=deploy/mlai/terraform test
