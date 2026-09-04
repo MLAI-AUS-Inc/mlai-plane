@@ -89,6 +89,8 @@ Both the infrastructure plan and apply environments need:
 Secrets:
 
 - `DIGITALOCEAN_TOKEN`: a new, scoped token; never reuse a developer token.
+  It is exposed only through the provider's ambient environment variable so it
+  is not serialized into saved Terraform plans.
 - `TF_STATE_ACCESS_KEY_ID` and `TF_STATE_SECRET_ACCESS_KEY`: credentials limited
   to the private Terraform-state bucket.
 

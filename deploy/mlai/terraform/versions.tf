@@ -11,7 +11,4 @@ terraform {
   backend "s3" {}
 }
 
-provider "digitalocean" {
-  token = var.digitalocean_token
-}
-
+provider "digitalocean" {}

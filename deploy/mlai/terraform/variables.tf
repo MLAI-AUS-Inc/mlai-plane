@@ -1,9 +1,3 @@
-variable "digitalocean_token" {
-  description = "Scoped DigitalOcean API token supplied through TF_VAR_digitalocean_token."
-  type        = string
-  sensitive   = true
-}
-
 variable "environment" {
   description = "Plane environment represented by this state."
   type        = string
@@ -58,4 +52,3 @@ variable "enable_backups" {
   type        = bool
   default     = false
 }
-

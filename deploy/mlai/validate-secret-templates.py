@@ -36,7 +36,7 @@ EXPECTED_WORKFLOW = {
         "CLOUDFLARE_TUNNEL_TOKEN": "${{ secrets.PLANE_CLOUDFLARE_TUNNEL_TOKEN }}",
     },
     Path(".github/workflows/mlai-infrastructure.yml"): {
-        "TF_VAR_digitalocean_token": "${{ secrets.DIGITALOCEAN_TOKEN }}",
+        "DIGITALOCEAN_TOKEN": "${{ secrets.DIGITALOCEAN_TOKEN }}",
         "AWS_ACCESS_KEY_ID": "${{ secrets.TF_STATE_ACCESS_KEY_ID }}",
         "AWS_SECRET_ACCESS_KEY": "${{ secrets.TF_STATE_SECRET_ACCESS_KEY }}",
     },
