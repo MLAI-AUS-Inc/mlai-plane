@@ -1,0 +1,20 @@
+[Unit]
+Description=MLAI Plane staging SSH tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudflared-plane-ssh tunnel --no-autoupdate run --token-file /etc/mlai-plane-ssh/tunnel.token
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

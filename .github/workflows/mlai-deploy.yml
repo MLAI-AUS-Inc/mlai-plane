@@ -30,6 +30,9 @@ jobs:
       SOURCE_SHA: ${{ inputs.source_sha }}
       PLANE_HOST: ${{ vars.PLANE_HOST }}
       PLANE_SSH_HOST_KEY: ${{ vars.PLANE_SSH_HOST_KEY }}
+      PLANE_SSH_ACCESS_HOST: ${{ vars.PLANE_SSH_ACCESS_HOST }}
+      TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.PLANE_SSH_ACCESS_CLIENT_ID }}
+      TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.PLANE_SSH_ACCESS_CLIENT_SECRET }}
       APP_DOMAIN: ${{ vars.PLANE_APP_DOMAIN }}
       SECRET_KEY: ${{ secrets.PLANE_SECRET_KEY }}
       LIVE_SERVER_SECRET_KEY: ${{ secrets.PLANE_LIVE_SERVER_SECRET_KEY }}
@@ -177,6 +180,43 @@ jobs:
           printf '%s\n' "$PLANE_SSH_HOST_KEY" > ~/.ssh/known_hosts
           chmod 0600 ~/.ssh/known_hosts
           ssh-keygen -F "$PLANE_HOST" -f ~/.ssh/known_hosts >/dev/null
+
+      - name: Install pinned Cloudflare SSH client
+        if: inputs.environment == 'staging'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.8.1/cloudflared-linux-amd64 \
+            --output /tmp/plane-cloudflared
+          echo '98d8eadbfdf8c7ec994e08260599c9be991e7833c746f98692b18bdf71c9b9dc  /tmp/plane-cloudflared' | sha256sum --check
+          sudo install -m 0755 /tmp/plane-cloudflared /usr/local/bin/cloudflared
+
+      - name: Configure staging SSH through Cloudflare Access
+        if: inputs.environment == 'staging'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PLANE_SSH_ACCESS_HOST" == "plane-ssh-staging.mlai.au" ]] || exit 1
+          [[ "$PLANE_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          [[ -n "$TUNNEL_SERVICE_TOKEN_ID" && -n "$TUNNEL_SERVICE_TOKEN_SECRET" ]] || exit 1
+          # Keep the verified IP-based host key while transporting SSH over HTTPS.
+          # cloudflared reads Access credentials from the environment, not argv.
+          # Exact Host matching also routes rsync and scp through this proxy.
+          umask 077
+          cat > ~/.ssh/config <<EOF
+          Host $PLANE_HOST
+            HostName $PLANE_SSH_ACCESS_HOST
+            HostKeyAlias $PLANE_HOST
+            User root
+            BatchMode yes
+            StrictHostKeyChecking yes
+            ConnectTimeout 30
+            ServerAliveInterval 15
+            ServerAliveCountMax 3
+            ProxyCommand /usr/local/bin/cloudflared access ssh --hostname %h
+          EOF
+          ssh "root@$PLANE_HOST" 'true'
 
       - name: Authenticate the host to GHCR
         env:
