@@ -109,6 +109,8 @@ migration_snapshot() {
   [[ -n "$db_volume" ]] || die "database volume identity is unavailable"
   db_system_id="$(
     compose exec -T plane-db psql \
+      --host=/var/run/postgresql \
+      --no-password \
       --username="$database_user" \
       --dbname="$database_name" \
       --tuples-only \
