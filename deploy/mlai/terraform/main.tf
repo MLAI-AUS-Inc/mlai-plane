@@ -3,6 +3,23 @@ locals {
   tags = [local.name, "mlai-plane"]
 }
 
+resource "digitalocean_project" "plane" {
+  name        = local.name
+  description = "MLAI Plane ${var.environment} resources managed by mlai-plane Terraform."
+  purpose     = "Web Application"
+  environment = var.environment == "production" ? "Production" : "Staging"
+  is_default  = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "digitalocean_project_resources" "plane" {
+  project   = digitalocean_project.plane.id
+  resources = [digitalocean_droplet.plane.urn]
+}
+
 resource "digitalocean_droplet" "plane" {
   name       = "${local.name}-01"
   image      = "ubuntu-24-04-x64"
@@ -33,8 +50,8 @@ resource "digitalocean_droplet" "plane" {
 }
 
 resource "digitalocean_firewall" "plane" {
-  name = local.name
-  tags = local.tags
+  name        = local.name
+  droplet_ids = [digitalocean_droplet.plane.id]
 
   inbound_rule {
     protocol         = "tcp"
@@ -61,4 +78,3 @@ resource "digitalocean_firewall" "plane" {
     destination_addresses = ["0.0.0.0/0", "::/0"]
   }
 }
-
