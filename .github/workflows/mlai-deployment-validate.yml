@@ -24,6 +24,8 @@ jobs:
         run: bash -n deploy/mlai/run.sh
       - name: Validate staging SSH tunnel configuration
         run: python3 deploy/mlai/test-ssh-tunnel.py
+      - name: Validate read-only migration identity lookup
+        run: python3 deploy/mlai/test-migration-identity.py
       - name: Validate migration isolation and secret templates
         run: |
           grep -Fq 'profiles: [migration]' deploy/mlai/compose.yml
