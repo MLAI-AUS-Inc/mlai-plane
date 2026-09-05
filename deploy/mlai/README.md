@@ -130,6 +130,41 @@ They also need `PLANE_HOST`, `PLANE_SSH_HOST_KEY`, and `PLANE_APP_DOMAIN`
 variables. The SSH host key must be a pre-recorded Ed25519 `known_hosts` line;
 the workflow deliberately never trusts `ssh-keyscan` during deployment.
 
+### Staging deployment SSH through Cloudflare Access
+
+Staging uses `plane-ssh-staging.mlai.au` as a Cloudflare Access-protected
+transport, while `PLANE_HOST` and `PLANE_SSH_HOST_KEY` retain the verified
+Droplet IP and its Ed25519 key. SSH, scp, and rsync all use the same proxy.
+The staging job fails if Access credentials or the expected hostname are missing;
+it does not fall back to public SSH. Production's existing transport is unchanged.
+
+One-time bootstrap (separate from the application tunnel):
+
+1. Create a dedicated remotely managed tunnel named `mlai-plane-staging-ssh`.
+   Its only ingress is `plane-ssh-staging.mlai.au` -> `ssh://127.0.0.1:22`,
+   followed by `http_status:404`.
+2. Create a self-hosted Access application for that exact hostname, with a
+   **Service Auth** policy including only a dedicated GitHub staging service
+   token. Do not use an Allow, Bypass, Everyone, or all-service-tokens policy.
+3. Only after the Access policy exists, create the proxied CNAME to the SSH
+   tunnel's `<UUID>.cfargotunnel.com`. No Plane web DNS or Worker cutover is
+   part of this operation.
+4. Install a checksum-verified cloudflared binary as a separate systemd service
+   on the staging Droplet. Keep its tunnel token in a root-only file and use
+   `tunnel --no-autoupdate run --token-file <path>`. It must be independent of
+   Compose so first deployment and recovery do not depend on Plane being up.
+5. In `staging-deployment` only, set `PLANE_SSH_ACCESS_HOST` to
+   `plane-ssh-staging.mlai.au` and secrets `PLANE_SSH_ACCESS_CLIENT_ID` and
+   `PLANE_SSH_ACCESS_CLIENT_SECRET`. These are Access service credentials,
+   not an account API token or the application tunnel token.
+6. Verify an unauthenticated connection is denied and authenticated SSH works
+   with the existing pinned host key before dispatching a deployment.
+
+The runner uses cloudflared 2026.8.1 with an embedded SHA-256 checksum. Review
+and update both when upgrading. Rotate the Access token before its expiry and
+update both GitHub secrets together. No account-wide Cloudflare API credential
+is needed in GitHub. The DigitalOcean firewall remains workstation-restricted.
+
 Bootstrap the private state bucket and its restricted credentials once outside
 this state. Afterward, use the **Plan or apply MLAI Plane infrastructure**
 workflow. Always run `plan` first and inspect it; `apply` is an external,

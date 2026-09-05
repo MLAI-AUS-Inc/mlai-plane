@@ -22,6 +22,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Validate scripts
         run: bash -n deploy/mlai/run.sh
+      - name: Validate staging SSH tunnel configuration
+        run: python3 deploy/mlai/test-ssh-tunnel.py
       - name: Validate migration isolation and secret templates
         run: |
           grep -Fq 'profiles: [migration]' deploy/mlai/compose.yml
