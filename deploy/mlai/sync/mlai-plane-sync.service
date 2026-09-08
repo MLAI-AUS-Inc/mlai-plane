@@ -1,0 +1,11 @@
+[Unit]
+Description=One-way MLAI Linear to Plane sync
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/mlai-plane-sync/run.sh
+TimeoutStartSec=0
+# A failed run stays visible in systemctl/journalctl; the timer retries later.

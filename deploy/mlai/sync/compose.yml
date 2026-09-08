@@ -1,0 +1,20 @@
+name: mlai-plane-sync
+services:
+  sync:
+    image: ${PLANE_SYNC_IMAGE:?set an immutable image digest}
+    command: [run, --apply]
+    env_file: /etc/mlai-plane-sync/sync.env
+    environment:
+      SYNC_STATE_DIR: /state
+    volumes:
+      - /var/lib/mlai-plane-sync:/state
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 64
+    restart: "no"
+    # Deliberately no application dependencies, ports or database volumes.
