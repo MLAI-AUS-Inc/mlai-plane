@@ -17,7 +17,7 @@ The intended staging path is:
 
 ```text
 Browser
-  -> plane-staging.mlai.au
+  -> plane.mlai.au
   -> mlai-plane-edge-staging Worker
   -> plane-origin-staging.mlai.au
   -> named Cloudflare Tunnel
@@ -185,12 +185,26 @@ are not accepted by `run.sh`.
 Use a named, dashboard-configured Tunnel. Store only its scoped token in the
 host `.env`. For staging, configure the private origin hostname to target
 `http://proxy:80` and set `originRequest.httpHostHeader` to
-`plane-staging.mlai.au`. Production must set it to `admin.mlai.au`. Include a
+`plane.mlai.au`. Production must set it to `admin.mlai.au`. Include a
 final `http_status:404` rule and keep direct Droplet web ingress closed.
 
 The Cloudflare Worker configuration, Access policy, DNS route and traffic
 cutover remain separate operations in `mlai-plane-edge`; this repository must
 not attempt to manage the same Worker with Terraform and Wrangler.
+
+### Canonical hostname (8 September 2026)
+
+The existing staging infrastructure now serves `https://plane.mlai.au`.
+This is a hostname change, not a promotion to the separate production stack.
+`plane-staging.mlai.au` redirects to the canonical hostname with paths and query
+strings preserved. Both hostnames retain the same Cloudflare Access policy.
+The private origin and SSH hostnames remain unchanged.
+
+Set `PLANE_APP_DOMAIN=plane.mlai.au` in GitHub's `staging-deployment` environment.
+Keep `APP_DOMAIN`, `WEB_URL`, `CORS_ALLOWED_ORIGINS` and the tunnel's origin Host
+header aligned. The deploy validator also permits the former hostname for an
+explicit rollback. Do not remove the old redirect: imported historical links may
+still reference it. No migration or data rewrite is needed for this change.
 
 ## Remaining rollout work
 
