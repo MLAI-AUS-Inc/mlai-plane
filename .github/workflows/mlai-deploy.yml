@@ -54,8 +54,8 @@ jobs:
             echo 'PLANE_APP_DOMAIN must be a hostname' >&2
             exit 1
           }
-          if [[ "${{ inputs.environment }}" == "staging" && "$APP_DOMAIN" != "plane-staging.mlai.au" ]]; then
-            echo 'Staging must use plane-staging.mlai.au' >&2
+          if [[ "${{ inputs.environment }}" == "staging" && "$APP_DOMAIN" != "plane.mlai.au" && "$APP_DOMAIN" != "plane-staging.mlai.au" ]]; then
+            echo 'Staging infrastructure must use plane.mlai.au (or plane-staging.mlai.au for rollback)' >&2
             exit 1
           fi
           if [[ "${{ inputs.environment }}" == "production" && "$APP_DOMAIN" != "admin.mlai.au" ]]; then
