@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync MLAI Linear to Plane every thirty minutes
+
+[Timer]
+OnCalendar=*-*-* *:00,30:00
+Persistent=true
+AccuracySec=30s
+Unit=mlai-plane-sync.service
+
+[Install]
+WantedBy=timers.target

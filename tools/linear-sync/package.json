@@ -1,0 +1,17 @@
+{
+  "name": "mlai-linear-plane-sync",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "dry-run": "node cli.mjs run",
+    "sync": "node cli.mjs run --apply"
+  },
+  "dependencies": {
+    "entities": "4.5.0",
+    "markdown-it": "14.2.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
