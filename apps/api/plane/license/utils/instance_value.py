@@ -11,6 +11,7 @@ from django.conf import settings
 # Module imports
 from plane.license.models import InstanceConfiguration
 from plane.license.utils.encryption import decrypt_data
+from plane.utils.cloudflare_email import get_cloudflare_configuration, using_cloudflare_email
 
 
 # Helper function to return value from the passed key
@@ -40,6 +41,11 @@ def get_configuration_value(keys):
 
 
 def get_email_configuration():
+    if using_cloudflare_email():
+        _, _, sender = get_cloudflare_configuration()
+        # Preserve the tuple used by existing mail tasks without reading stale SMTP settings.
+        # These connection arguments are ignored by the HTTPS backend; no token enters the tuple.
+        return ("api.cloudflare.com", "", "", 443, "0", "0", sender)
     return get_configuration_value(
         [
             {"key": "EMAIL_HOST", "default": os.environ.get("EMAIL_HOST")},

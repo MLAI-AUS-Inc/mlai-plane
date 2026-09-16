@@ -212,6 +212,12 @@ smoke() {
   curl --fail --silent --show-error --location --max-time 30 "$url/" >/dev/null
 }
 
+test_email() {
+  [[ "$#" == "1" && -n "$1" ]] || die "usage: run.sh test-email <recipient>"
+  # Exec only in an already-running worker. This never starts services or a migrator.
+  compose exec -T worker python manage.py test_email "$1"
+}
+
 case "${1:-}" in
   config) config ;;
   pull) config; compose pull ;;
@@ -221,7 +227,8 @@ case "${1:-}" in
   status) compose ps ;;
   logs) shift; compose logs "$@" ;;
   smoke) smoke ;;
+  test-email) shift; with_operation_lock test_email "$@" ;;
   *)
-    die "usage: run.sh {config|pull|deploy|migration-plan|migrate <approved-plan-sha256>|status|logs|smoke}"
+    die "usage: run.sh {config|pull|deploy|migration-plan|migrate <approved-plan-sha256>|status|logs|smoke|test-email <recipient>}"
     ;;
 esac

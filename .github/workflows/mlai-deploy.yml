@@ -12,6 +12,10 @@ on:
         description: Full 40-character commit SHA whose images should be deployed
         required: true
         type: string
+      test_email:
+        description: Optional recipient for one post-deploy test email (leave empty to send nothing)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -41,6 +45,11 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.PLANE_MINIO_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.PLANE_MINIO_SECRET_KEY }}
       CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.PLANE_CLOUDFLARE_TUNNEL_TOKEN }}
+      EMAIL_BACKEND: ${{ vars.PLANE_EMAIL_BACKEND || 'django.core.mail.backends.smtp.EmailBackend' }}
+      CLOUDFLARE_EMAIL_ACCOUNT_ID: ${{ vars.PLANE_CLOUDFLARE_EMAIL_ACCOUNT_ID }}
+      CLOUDFLARE_EMAIL_FROM: ${{ vars.PLANE_CLOUDFLARE_EMAIL_FROM }}
+      CLOUDFLARE_EMAIL_API_TOKEN: ${{ secrets.PLANE_CLOUDFLARE_EMAIL_API_TOKEN }}
+      PLANE_TEST_EMAIL: ${{ inputs.test_email }}
     steps:
       - name: Validate immutable release and target
         shell: bash
@@ -127,7 +136,40 @@ jobs:
           umask 077
           python3 - <<'PY'
           import os
+          import re
           from pathlib import Path
+
+          smtp_backend = "django.core.mail.backends.smtp.EmailBackend"
+          cloudflare_backend = "plane.utils.cloudflare_email.EmailBackend"
+          backend = os.environ["EMAIL_BACKEND"]
+          if backend not in (smtp_backend, cloudflare_backend):
+              raise SystemExit("PLANE_EMAIL_BACKEND must select SMTP or Cloudflare")
+          email_values = {
+              "EMAIL_BACKEND": backend,
+              "CLOUDFLARE_EMAIL_ACCOUNT_ID": "",
+              "CLOUDFLARE_EMAIL_API_TOKEN": "",
+              "CLOUDFLARE_EMAIL_FROM": "",
+          }
+          # Restrict rendered values to dotenv-safe characters; never log secret values.
+          mailbox_pattern = r"[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"
+          if backend == cloudflare_backend:
+              if not Path("apps/api/plane/utils/cloudflare_email.py").is_file():
+                  raise SystemExit("Selected release does not support Cloudflare email")
+              patterns = {
+                  "CLOUDFLARE_EMAIL_ACCOUNT_ID": r"[0-9a-f]{32}",
+                  "CLOUDFLARE_EMAIL_API_TOKEN": r"[A-Za-z0-9_-]+",
+                  "CLOUDFLARE_EMAIL_FROM": mailbox_pattern,
+              }
+              for key, pattern in patterns.items():
+                  value = os.environ.get(key, "")
+                  if not re.fullmatch(pattern, value):
+                      raise SystemExit(f"{key} is missing or malformed")
+                  email_values[key] = value
+          recipient = os.environ.get("PLANE_TEST_EMAIL", "")
+          if recipient and not re.fullmatch(mailbox_pattern, recipient):
+              raise SystemExit("test_email must be a single email address")
+          if recipient and "test-email)" not in Path("deploy/mlai/run.sh").read_text():
+              raise SystemExit("Selected release does not support the test-email deployment step")
 
           values = {
               "PLANE_FRONTEND_IMAGE": os.environ["PLANE_FRONTEND_IMAGE"],
@@ -158,6 +200,7 @@ jobs:
               "WEBHOOK_ALLOWED_HOSTS": "",
               "CLOUDFLARE_TUNNEL_TOKEN": os.environ["CLOUDFLARE_TUNNEL_TOKEN"],
               "PLANE_MIGRATION_APPROVAL": "",
+              **email_values,
           }
           Path("/tmp/mlai-plane.env").write_text(
               "".join(f"{key}={value}\n" for key, value in values.items()),
@@ -242,6 +285,18 @@ jobs:
       - name: Verify public route
         shell: bash
         run: curl --fail --silent --show-error --location --max-time 45 "https://$APP_DOMAIN/" >/dev/null
+
+      - name: Send explicitly requested test email
+        if: inputs.test_email != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$PLANE_TEST_EMAIL" | ssh "root@$PLANE_HOST" '
+            set -eu
+            IFS= read -r recipient
+            cd /opt/mlai-plane
+            ./run.sh test-email "$recipient"
+          '
 
       - name: Remove rendered credentials
         if: always()

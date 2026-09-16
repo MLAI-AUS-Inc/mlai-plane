@@ -206,6 +206,86 @@ header aligned. The deploy validator also permits the former hostname for an
 explicit rollback. Do not remove the old redirect: imported historical links may
 still reference it. No migration or data rewrite is needed for this change.
 
+## Cloudflare outbound email
+
+Plane creates workspace invitations before the background worker sends email.
+A working invitation URL therefore does not prove that a message was sent. The
+MLAI deployment can use Cloudflare Email Sending over HTTPS so it does not
+depend on DigitalOcean's default-blocked SMTP ports. This is an opt-in Django
+email backend shared by the existing invitation, password-reset, notification,
+and test-email paths; no SMTP relay or database migration is needed.
+
+Prerequisites:
+
+1. Enable Email Sending on the MLAI Workers Paid account and onboard the sender
+   domain. For the existing staging stack, use `plane.mlai.au` and
+   `no-reply@plane.mlai.au`. Verify its Cloudflare-managed SPF, DKIM, bounce MX,
+   and DMARC records. Do not replace MLAI's root-domain mailbox MX records.
+2. Create a dedicated token scoped to the MLAI account with **Email Sending:
+   Edit**. Do not install a broad operator or DNS-management token in Plane.
+3. In the protected `staging-deployment` GitHub environment, add secret
+   `PLANE_CLOUDFLARE_EMAIL_API_TOKEN` and set these variables:
+
+   | Variable | Value |
+   | --- | --- |
+   | `PLANE_EMAIL_BACKEND` | `plane.utils.cloudflare_email.EmailBackend` |
+   | `PLANE_CLOUDFLARE_EMAIL_ACCOUNT_ID` | The MLAI account's 32-character ID |
+   | `PLANE_CLOUDFLARE_EMAIL_FROM` | `no-reply@plane.mlai.au` |
+
+The deployment workflow renders these into the root-only host `.env` and
+passes them to the API and background workers. It refuses missing or malformed
+Cloudflare settings and releases that predate this backend. Existing deployments
+default to SMTP until the backend variable is explicitly set. Credentials are
+never written to Plane's database or returned by the public instance endpoint.
+With this backend selected, the instance's legacy `is_smtp_configured` flag
+reports whether the Cloudflare configuration is complete. Saved instance-admin
+SMTP settings are ignored; manage this provider through the protected deployment
+environment, including the From address.
+
+After merging and publishing images for the merged commit, dispatch **Deploy
+MLAI Plane without migrations** from `main` with `environment=staging` and the
+full published commit SHA. Supply the optional `test_email` input only when an
+operator has approved sending one test message to that address. The job uses
+the existing GitHub-only SSH tunnel, retains the pinned host key, and executes
+`run.sh test-email <recipient>` inside the running worker after deployment. It
+does not open public SSH or start a migrator. Test-email failures return a nonzero
+exit code and fail the workflow; they do not automatically roll back deployment.
+
+Verify `/api/instances/` reports `config.is_smtp_configured=true`, inspect the
+test message in the recipient's inbox and Cloudflare's delivery log, then resend
+the previously failed invitations. A successful command means Cloudflare
+accepted or queued the message, not that the recipient's inbox received it.
+No invitations are automatically resent during deployment.
+
+The backend sends Plane's MIME message through the fixed Cloudflare HTTPS
+endpoint, including attachments and all envelope recipients while omitting Bcc
+from visible headers. It uses the configured verified sender for both the
+envelope and From header. It rejects provider errors, suppressed recipients,
+permanent bounces, incomplete delivery results, redirects, and timeouts. It does
+not automatically retry ambiguous failures, which could duplicate invitations;
+inspect Cloudflare's logs before resending. Error messages exclude credentials,
+recipients, message bodies, and raw provider responses.
+
+For rollback, restore `PLANE_EMAIL_BACKEND` to
+`django.core.mail.backends.smtp.EmailBackend` and redeploy the reviewed release.
+The renderer then omits the Cloudflare credentials. SMTP must be configured and
+reachable separately; reverting to the previous unconfigured state will stop
+email delivery again.
+
+Local checks (mocked HTTP, no service startup or migrations):
+
+```sh
+# Use an isolated Python environment with the project's pinned Django and requests.
+python deploy/mlai/test-cloudflare-email.py
+python deploy/mlai/test-email-deployment.py
+python deploy/mlai/validate-secret-templates.py
+docker compose --env-file deploy/mlai/.env.example -f deploy/mlai/compose.yml config --quiet
+```
+
+References: [Cloudflare raw email API](https://developers.cloudflare.com/api/resources/email_sending/methods/send_raw/),
+[sender-domain setup](https://developers.cloudflare.com/email-service/get-started/send-emails/),
+[DigitalOcean SMTP restrictions](https://docs.digitalocean.com/support/why-is-smtp-blocked/).
+
 ## Remaining rollout work
 
 Before staging can be deployed:
