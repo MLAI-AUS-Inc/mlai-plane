@@ -21,6 +21,7 @@ from plane.license.api.serializers import InstanceSerializer
 from plane.license.models import Instance
 from plane.license.utils.instance_value import get_configuration_value
 from plane.utils.cache import cache_response, invalidate_cache
+from plane.utils.cloudflare_email import email_is_configured
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 
@@ -156,7 +157,8 @@ class InstanceEndpoint(BaseAPIView):
         data["file_size_limit"] = float(os.environ.get("FILE_SIZE_LIMIT", 5242880))
 
         # is smtp configured
-        data["is_smtp_configured"] = bool(EMAIL_HOST)
+        # Keep the public compatibility flag for clients that gate email features on it.
+        data["is_smtp_configured"] = email_is_configured(EMAIL_HOST)
 
         # Base URL
         data["admin_base_url"] = settings.ADMIN_BASE_URL

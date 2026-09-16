@@ -294,7 +294,10 @@ TIME_ZONE = "UTC"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Email settings
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+CLOUDFLARE_EMAIL_ACCOUNT_ID = os.environ.get("CLOUDFLARE_EMAIL_ACCOUNT_ID", "")
+CLOUDFLARE_EMAIL_API_TOKEN = os.environ.get("CLOUDFLARE_EMAIL_API_TOKEN", "")
+CLOUDFLARE_EMAIL_FROM = os.environ.get("CLOUDFLARE_EMAIL_FROM", "")
 
 # Storage Settings
 # Use Minio settings

@@ -61,7 +61,8 @@ class Command(BaseCommand):
                 connection=connection,
             )
             msg.attach_alternative(html_content, "text/html")
-            msg.send()
-            self.stdout.write(self.style.SUCCESS("Email successfully sent"))
+            if msg.send() != 1:
+                raise CommandError("Email transport did not accept the test message")
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"Error: Email could not be delivered due to {e}"))
+            raise CommandError("Test email failed; inspect the configured provider's delivery logs") from e
+        self.stdout.write(self.style.SUCCESS("Email accepted by the configured transport; verify inbox delivery"))

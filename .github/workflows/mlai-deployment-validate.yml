@@ -5,11 +5,21 @@ on:
     paths:
       - "deploy/mlai/**"
       - ".github/workflows/mlai-*.yml"
+      - "apps/api/plane/utils/cloudflare_email.py"
+      - "apps/api/plane/license/utils/instance_value.py"
+      - "apps/api/plane/license/api/views/instance.py"
+      - "apps/api/plane/settings/common.py"
+      - "apps/api/plane/db/management/commands/test_email.py"
   push:
     branches: [main]
     paths:
       - "deploy/mlai/**"
       - ".github/workflows/mlai-*.yml"
+      - "apps/api/plane/utils/cloudflare_email.py"
+      - "apps/api/plane/license/utils/instance_value.py"
+      - "apps/api/plane/license/api/views/instance.py"
+      - "apps/api/plane/settings/common.py"
+      - "apps/api/plane/db/management/commands/test_email.py"
   workflow_dispatch:
 
 permissions:
@@ -20,6 +30,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Test Cloudflare email without a database or network
+        run: |
+          python -m pip install Django==5.2.15 requests==2.33.0
+          python deploy/mlai/test-cloudflare-email.py
+          python deploy/mlai/test-email-deployment.py
       - name: Validate scripts
         run: bash -n deploy/mlai/run.sh
       - name: Validate staging SSH tunnel configuration

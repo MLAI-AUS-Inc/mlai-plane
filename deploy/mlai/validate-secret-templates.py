@@ -23,6 +23,7 @@ EXPECTED_ENV = {
     "AWS_SECRET_ACCESS_KEY": "replace-with-a-random-minio-secret-key",
     "CLOUDFLARE_TUNNEL_TOKEN": "replace-with-a-scoped-tunnel-token",
     "PLANE_MIGRATION_APPROVAL": "",
+    "CLOUDFLARE_EMAIL_API_TOKEN": "",
 }
 
 EXPECTED_WORKFLOW = {
@@ -34,6 +35,7 @@ EXPECTED_WORKFLOW = {
         "AWS_ACCESS_KEY_ID": "${{ secrets.PLANE_MINIO_ACCESS_KEY }}",
         "AWS_SECRET_ACCESS_KEY": "${{ secrets.PLANE_MINIO_SECRET_KEY }}",
         "CLOUDFLARE_TUNNEL_TOKEN": "${{ secrets.PLANE_CLOUDFLARE_TUNNEL_TOKEN }}",
+        "CLOUDFLARE_EMAIL_API_TOKEN": "${{ secrets.PLANE_CLOUDFLARE_EMAIL_API_TOKEN }}",
     },
     Path(".github/workflows/mlai-infrastructure.yml"): {
         "DIGITALOCEAN_TOKEN": "${{ secrets.DIGITALOCEAN_TOKEN }}",
@@ -52,6 +54,7 @@ DOTENV_ASSIGNMENT = re.compile(
     rf"^\s*(?:export\s+)?({'|'.join(sorted(SECRET_KEYS))})=(.*)$"
 )
 TOKEN_SIGNATURES = (
+    re.compile(r"\bcfat_[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bdop_v1_[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bdoo_v1_[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bdor_v1_[A-Za-z0-9_-]{20,}\b"),
