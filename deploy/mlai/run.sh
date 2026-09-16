@@ -184,7 +184,9 @@ deploy_locked() {
     mv "$pending_env" "$ENV_FILE"
   fi
   config
-  compose pull
+  # Reuse installed dependencies when their upstream registry is unavailable.
+  # Application images are digest-pinned, so a new release still pulls new images.
+  compose pull --policy missing
   compose up -d --remove-orphans --no-build --wait --wait-timeout 240
   verify_api
 }
