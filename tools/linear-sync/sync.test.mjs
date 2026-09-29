@@ -92,6 +92,7 @@ function fixture() {
     const body = init.body ? JSON.parse(init.body) : null;
     const response = (x, status = 200) => new Response(JSON.stringify(x), { status });
     if (path === "/api/v1/users/me/") return response({ id: "u", email: "test@example.invalid" });
+    if (path === "/api/v1/workspaces/mlai/members/") return response([{ id: "u", email: "test@example.invalid" }]);
     if (path === ROOT) return response(Object.values(db.projects));
     const tail = path.slice(ROOT.length).split("/").filter(Boolean),
       project = tail[0];

@@ -4,6 +4,8 @@ import { bootstrap } from "./bootstrap.mjs";
 import { Linear } from "./source.mjs";
 import { Plane } from "./plane.mjs";
 import { Engine } from "./engine.mjs";
+import { Writeback } from "./writeback.mjs";
+import { LinearWriter } from "./linear-write.mjs";
 const args = process.argv.slice(2),
   option = (name) => {
     const n = args.indexOf(name);
@@ -23,6 +25,9 @@ try {
   } else if (args[0] === "run") {
     const state = store.load(),
       apply = args.includes("--apply");
+    if (settings.writeBack && apply && !settings.linearWriteKey) throw Error("LINEAR_WRITE_API_KEY is required for writeback");
+    const writer = settings.writeBack ? new LinearWriter(settings.linearWriteKey, { apply }) : null;
+    if (settings.writeBack && apply) await writer.identity();
     engine = new Engine({
       state,
       store,
@@ -31,6 +36,11 @@ try {
       apply,
     });
     const report = await engine.run({ reconcile: args.includes("--reconcile") });
+    if (settings.writeBack) {
+      await new Writeback(engine, writer).run();
+      report.finishedAt = new Date().toISOString();
+      report.pending = Object.values(state.pending).reduce((n, p) => n + Object.keys(p).length, 0);
+    }
     store.report(report);
     console.log(
       JSON.stringify({

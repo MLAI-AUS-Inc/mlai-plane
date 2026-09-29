@@ -32,6 +32,8 @@ export function config(env = process.env) {
   if (!isAbsolute(env.SYNC_STATE_DIR)) throw Error("SYNC_STATE_DIR must be absolute");
   return {
     linearKey: env.LINEAR_API_KEY,
+    linearWriteKey: env.LINEAR_WRITE_API_KEY || null,
+    writeBack: env.ENABLE_LINEAR_WRITEBACK === "true",
     planeKey: env.PLANE_API_KEY,
     cfId: env.CF_ACCESS_CLIENT_ID,
     cfSecret: env.CF_ACCESS_CLIENT_SECRET,
