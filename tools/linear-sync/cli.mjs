@@ -39,6 +39,7 @@ try {
     if (settings.writeBack) {
       await new Writeback(engine, writer).run();
       report.finishedAt = new Date().toISOString();
+      if (apply) { state.lastRun.conflicts = report.conflicts.length; engine.save(); }
       report.pending = Object.values(state.pending).reduce((n, p) => n + Object.keys(p).length, 0);
     }
     store.report(report);
