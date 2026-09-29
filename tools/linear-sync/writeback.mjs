@@ -93,15 +93,15 @@ export class Writeback {
       }
       return;
     }
-    if (!previous && Date.parse(row.created_at) < Date.parse(this.reverse.cutover)) {
+    if (!previous && (id || Date.parse(row.created_at) < Date.parse(this.reverse.cutover))) {
       this.reverse.issues[row.id] = { plane: snapshot(row), linear: id ? sourceFields(this.e.data.issues[id]) : null };
+      this.e.save();
       return;
     }
     if (!id) {
       if (row.external_source === NAMESPACE) throw new Conflict("Imported Plane issue has no checkpoint mapping");
       return this.createIssue(projectId, row);
     }
-    if (!previous) throw new Conflict("Imported Plane issue lacks reverse baseline");
     const changed = fields.filter((field) => !equal(field, row[field], previous.plane[field]));
     if (!changed.length) return;
     const cached = this.e.data.issues[id];

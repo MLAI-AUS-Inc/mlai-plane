@@ -84,3 +84,10 @@ test("new Plane comment on imported issue targets the Linear issue ID", async ()
   assert.equal(calls[0].issueId, linearId);
   assert.equal(engine.state.comments[commentId].issue, issueId);
 });
+test("newly imported Linear issue receives a reverse baseline without writeback", async () => {
+  const { wb, writes } = fixture();
+  delete wb.reverse.issues[issueId];
+  await wb.issue(project, { ...row, created_at: "2026-09-29T02:00:00Z" }, false);
+  assert.equal(writes.length, 0);
+  assert.equal(wb.reverse.issues[issueId].linear.title, "Old");
+});
