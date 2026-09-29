@@ -245,13 +245,17 @@ export class Writeback {
       try { await this.e.project(key); rows = await this.e.plane.list(path); }
       catch (error) { this.conflict("projects", key, error.message); continue; }
       for (const row of rows) {
-        try {
-          await this.issue(project.id, row, bootstrap);
-          if (!bootstrap && Date.parse(row.updated_at) >= Date.parse(this.reverse.cutover))
-            await this.comments(project.id, row, false);
-        } catch (error) {
+        try { await this.issue(project.id, row, bootstrap); }
+        catch (error) {
           if (!(error instanceof Conflict)) throw error;
           this.conflict("plane-issues", row.id, error.message);
+        }
+        if (!bootstrap && Date.parse(row.updated_at) >= Date.parse(this.reverse.cutover)) {
+          try { await this.comments(project.id, row, false); }
+          catch (error) {
+            if (!(error instanceof Conflict)) throw error;
+            this.conflict("plane-comments", row.id, error.message);
+          }
         }
       }
     }

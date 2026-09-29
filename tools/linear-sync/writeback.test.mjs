@@ -91,3 +91,9 @@ test("newly imported Linear issue receives a reverse baseline without writeback"
   assert.equal(writes.length, 0);
   assert.equal(wb.reverse.issues[issueId].linear.title, "Old");
 });
+test("Plane volunteer assignee maps to a matching Linear member", () => {
+  const { wb, engine } = fixture();
+  engine.data.users["linear-volunteer"] = { id: "linear-volunteer", email: "volunteer@mlai.au", active: true };
+  wb.members = [{ id: "plane-volunteer", email: "volunteer@mlai.au" }];
+  assert.equal(wb.assigneeFor({ assignees: ["plane-volunteer"] }), "linear-volunteer");
+});
