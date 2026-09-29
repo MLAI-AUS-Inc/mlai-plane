@@ -101,7 +101,7 @@ function fixture() {
         table = comments ? db.comments : db.issues,
         id = comments ? tail[4] : tail[2];
       if (method === "GET") {
-        if (id) return table[id] ? response(table[id]) : response({}, 404);
+        if (id) return table[id] && !table[id].archived_at ? response(table[id]) : response({}, 404);
         if (query.has("external_id")) {
           const row = Object.values(table).find((r) => r.external_id === query.get("external_id"));
           return row ? response(row) : response({}, 404);
@@ -216,6 +216,19 @@ test("creates issue/comment once and remains idempotent on repeat", async () => 
   };
   assert.equal((await f.run()).creates, 2);
   assert.equal((await f.run()).creates, 0);
+  assert.equal(f.writes.length, 2);
+});
+test("archived issue creation and later reads use external identity", async () => {
+  const f = fixture(),
+    issue = f.add();
+  issue.archivedAt = "2026-01-01T00:31:00Z";
+  assert.equal((await f.run()).creates, 1);
+  issue.title = "Updated archived issue";
+  issue.updatedAt = "2026-01-01T00:40:00Z";
+  const report = await f.run();
+  assert.equal(report.conflicts.length, 0);
+  assert.equal(report.updates, 1);
+  assert.equal(f.db.issues["target-1"].name, "[T-1] Updated archived issue");
   assert.equal(f.writes.length, 2);
 });
 test("updates source changes and verifies saved content", async () => {
