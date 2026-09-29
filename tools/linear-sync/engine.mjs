@@ -99,9 +99,20 @@ export class Engine {
     const collection = kind === "comment" ? base + issueId + "/comments/" : base;
     const keys = Object.keys(desired),
       intentKey = kind + ":" + id;
+    const readById = async (recordId) => {
+      const row = await this.plane.request("GET", collection + recordId + "/");
+      if (row || kind !== "issue") return row;
+      // Plane hides archived work items from the direct detail route but still
+      // exposes imported items through their external identity.
+      const found = await this.plane.request(
+        "GET",
+        collection + "?external_id=" + encodeURIComponent(sourceId) + "&external_source=" + NAMESPACE
+      );
+      return found?.id === recordId ? found : null;
+    };
     let current = null;
     if (!project.startsWith("dry:") && !issueId?.startsWith("dry:")) {
-      if (map) current = await this.plane.request("GET", collection + map.id + "/");
+      if (map) current = await readById(map.id);
       else if (kind === "comment") {
         const rows = await this.plane.list(collection);
         const matches = rows.filter((c) => c.external_id === sourceId && c.external_source === NAMESPACE);
@@ -135,12 +146,12 @@ export class Engine {
       this.report.changes.push({ kind, id, action: "update", fields: Object.keys(patch) });
       if (this.apply) {
         // Re-read immediately before write. Plane does not expose conditional PATCH.
-        const fresh = await this.plane.request("GET", collection + current.id + "/");
+        const fresh = await readById(current.id);
         if (keys.some((k) => !equal(k, fresh[k], current[k]))) throw new Conflict("Destination changed during sync");
         this.state.intents[intentKey] = { desired, previous: map.last };
         this.save();
         await this.plane.request("PATCH", collection + current.id + "/", patch);
-        const saved = await this.plane.request("GET", collection + current.id + "/");
+        const saved = await readById(current.id);
         if (Object.keys(patch).some((k) => !equal(k, saved[k], patch[k])))
           throw Error("Plane update verification failed");
       }
@@ -160,7 +171,7 @@ export class Engine {
         external_id: sourceId,
         external_source: NAMESPACE,
       });
-      const saved = await this.plane.request("GET", collection + row.id + "/");
+      const saved = await readById(row.id);
       if (keys.some((k) => !equal(k, saved[k], desired[k]))) throw Error("Plane create verification failed");
     }
     map = maps[id] = { id: row.id, project, last: desired, ...(kind === "comment" ? { issue: issueId } : {}) };

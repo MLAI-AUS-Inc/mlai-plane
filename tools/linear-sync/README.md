@@ -16,6 +16,35 @@ private API origin and import namespace are fixed in `config.mjs`.
 - DigitalOcean scheduling is prepared below but has not been deployed. No
   Linear mutations, database migrations or application restarts were performed.
 
+## Recovery check (29 September 2026)
+
+- The local five-minute LaunchAgent had stopped syncing on 10 September because
+  a stale lock remained after its process exited. The lock owner was confirmed
+  absent, the checkpoint was backed up, and the lock was cleared.
+- A full live reconciliation applied the backlog. The resulting checkpoint had
+  zero pending records and five review warnings for source records missing or no
+  longer visible in Linear; their Plane copies were retained.
+- Plane's direct detail route returns 404 for archived work items. The sync now
+  verifies them through their imported external identity. Its regression test
+  covers creation and subsequent updates of an archived issue.
+- The local LaunchAgent was restarted and its first automatic run completed
+  with zero writes, conflicts, or pending records. The DigitalOcean thirty-minute
+  timer was not yet deployed at this check.
+
+## DigitalOcean cutover (29 September 2026)
+
+- Stopped the local LaunchAgent after a successful run and transferred its
+  checkpoint to the Plane staging Droplet. Keep the local writer stopped while
+  the cloud timer is enabled; separate checkpoint copies must not write together.
+- Built the tested sync code on the x86_64 Droplet. The deployed image is pinned
+  by its local SHA-256 image ID in `/etc/mlai-plane-sync/image.env`; `run.sh`
+  accepts that form as well as a GHCR repository digest. Keep the image present
+  on the host, since a local ID cannot be pulled after image pruning.
+- The cloud dry run found three new records and no conflicts. Its first apply
+  created those three and left zero pending. The thirty-minute systemd timer is
+  enabled at minute 00 and 30. Verify subsequent runs with `systemctl status
+  mlai-plane-sync.service` and the private `last-report.json`.
+
 ## Scope and safety
 
 - Poll changed projects, issues, comments, attachment records, cycles, documents,
@@ -112,18 +141,20 @@ ambiguous creates. Preserve the state, including pending records and tickets.
 An upload whose ticket was lost or expired fails closed for operator recovery;
 the sync will not delete or duplicate the remote asset to work around it.
 
-## DigitalOcean: every thirty minutes, not deployed by these files
+## DigitalOcean: every thirty minutes
 
 See `deploy/mlai/sync`. There are no Actions workflows or automatic deploy hooks.
 Do not use the application's Compose file to run this process.
 
 1. Stop the local writer and transfer its entire private state directory securely.
-2. Build this directory for the Droplet's architecture, publish to
-   `ghcr.io/mlai-aus-inc/mlai-plane-linear-sync`, and select an immutable digest.
+2. Build this directory for the Droplet's architecture. Publish to
+   `ghcr.io/mlai-aus-inc/mlai-plane-linear-sync` and select an immutable
+   repository digest, or build directly on the Droplet and pin the complete
+   local `sha256:` image ID. A locally built image must be retained on the host.
 3. Place `compose.yml` and executable `run.sh` in `/opt/mlai-plane-sync`.
-4. Place credentials in `/etc/mlai-plane-sync/sync.env`, mode 600, and
-   `PLANE_SYNC_IMAGE=ghcr.io/mlai-aus-inc/mlai-plane-linear-sync@sha256:...` in
-   `/etc/mlai-plane-sync/image.env`. There is no reason to provide DO, database,
+4. Place credentials in `/etc/mlai-plane-sync/sync.env`, mode 600, and the
+   selected immutable image reference in `/etc/mlai-plane-sync/image.env` as
+   `PLANE_SYNC_IMAGE=...`. There is no reason to provide DO, database,
    SSH or Cloudflare account-admin credentials to the sync container.
 5. Place state in `/var/lib/mlai-plane-sync`, directory mode 700, files mode 600,
    owned by container UID 1000. Back it up: losing mappings is not a reason to
