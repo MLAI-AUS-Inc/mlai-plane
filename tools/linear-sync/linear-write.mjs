@@ -1,4 +1,4 @@
-import { SOURCE_ID } from "./config.mjs";
+import { Linear } from "./source.mjs";
 
 const endpoint = "https://api.linear.app/graphql";
 export class LinearWriter {
@@ -9,14 +9,9 @@ export class LinearWriter {
   }
   async identity() {
     if (!this.key) throw Error("LINEAR_WRITE_API_KEY is required for writeback");
-    const response = await this.fetcher(endpoint, {
-      method: "POST", redirect: "error", signal: AbortSignal.timeout(30000),
-      headers: { Authorization: this.key, "Content-Type": "application/json" },
-      body: JSON.stringify({ query: "query SyncWriteIdentity { organization { id } }" }),
-    });
-    const result = await response.json();
-    if (!response.ok || result.errors?.length || result.data?.organization?.id !== SOURCE_ID)
-      throw Error("Linear write credential cannot access the expected workspace");
+    // Reuse the read client's retry and workspace guard. A transient 5xx from
+    // Linear can have a plain-text body, so parsing it as JSON would fail here.
+    await new Linear(this.key, this.fetcher).identity();
   }
   async request(query, variables = {}) {
     if (!this.apply) throw Error("Dry run cannot write to Linear");

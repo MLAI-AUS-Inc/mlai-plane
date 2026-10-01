@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Writeback } from "./writeback.mjs";
 import { LinearWriter } from "./linear-write.mjs";
+import { SOURCE_ID } from "./config.mjs";
 
 const project = "34e2abe0-12b8-4f99-9bd0-43be43ade098";
 const sourceProject = "988ce35c-3ce2-4499-920a-68ae00fcfa90";
@@ -103,4 +104,16 @@ test("Plane issue created during baseline is left for the next writeback run", a
   await wb.issue(project, { ...row, id: newId, created_at: "2026-09-29T02:00:00Z" }, true);
   assert.equal(wb.reverse.issues[newId], undefined);
   assert.equal(engine.report.creates, 0);
+});
+
+test("write credential identity retries a temporary non-JSON Linear error", async () => {
+  let calls = 0;
+  const writer = new LinearWriter("key", { apply: true, fetcher: async () => {
+    calls++;
+    return calls === 1
+      ? new Response("upstream connect error", { status: 503 })
+      : Response.json({ data: { organization: { id: SOURCE_ID } } });
+  } });
+  await writer.identity();
+  assert.equal(calls, 2);
 });
