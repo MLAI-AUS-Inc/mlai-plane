@@ -1,7 +1,7 @@
 # MLAI Linear ↔ Plane sync
 
 This is a separate Node 22 process, not a Plane plugin or database migration.
-Linear writes are opt-in with a separate credential. The source organization, Plane workspace,
+Linear writes are opt-in; a separate credential is optional. The source organization, Plane workspace,
 private API origin and import namespace are fixed in `config.mjs`.
 
 ## Local verification (8 September 2026)
@@ -65,12 +65,12 @@ left as a conflict for review.
 Writes use the Plane UUID as the Linear issue/comment UUID so an uncertain
 response can be checked before retrying. The sync re-reads both records before
 updating and stops if the same field changed in both systems. The first baseline
-excludes older Plane edits from writeback. The separate write key acts as its
-owner in Linear; the sync does not impersonate volunteer accounts.
+excludes older Plane edits from writeback. The selected key acts as its owner in Linear; the sync does not
+impersonate volunteer accounts.
 
 Before enabling it on the cloud host, back up the live checkpoint, run a dry
-run with the flag enabled, and inspect the private report. Then supply the
-write key and run an apply once to establish the baseline. Do not start a
+run with the flag enabled, and inspect the private report. Then run an apply
+once to establish the baseline. Do not start a
 second writer from a copy of the checkpoint. No database migration is needed.
 
 ## Scope and safety
@@ -81,8 +81,8 @@ second writer from a copy of the checkpoint. No database migration is needed.
 - Reuse the September 2026 import UUID mappings. Do not re-import the workspace.
 - Create new projects/issues/comments and update supported issue fields and
   comment content. Source authors are attribution, not impersonated accounts.
-- Only the already-authenticated Plane user's matching active Linear identity
-  is assigned natively. No account creation or invitations.
+- Active Linear assignees with a unique matching Plane workspace email are
+  assigned natively. No account creation or invitations.
 - Same-project parents use native relationships; cross-project parents use links.
   New supported relationships are added, never automatically removed.
 - Copy new Linear-hosted non-video files up to 5 MiB and verify their downloaded
