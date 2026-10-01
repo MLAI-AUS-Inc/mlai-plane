@@ -159,7 +159,13 @@ Stop before deploying a cloud writer:
 
 ```sh
 launchctl bootout gui/$(id -u)/au.mlai.plane.linear-sync
+launchctl disable gui/$(id -u)/au.mlai.plane.linear-sync
 ```
+
+Disable the LaunchAgent as well as stopping it so a later login does not
+restart a second writer against the cloud checkpoint. Verify with
+`launchctl print-disabled gui/$(id -u)`. Re-enable only during a deliberate
+cutback to the Mac, after stopping the cloud timer.
 
 Wait for any running sync to finish; inspect `run.lock` and its PID. Do not remove
 a lock merely because it is old. After a confirmed process crash, an operator
