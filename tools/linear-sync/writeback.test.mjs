@@ -97,3 +97,10 @@ test("Plane volunteer assignee maps to a matching Linear member", () => {
   wb.members = [{ id: "plane-volunteer", email: "volunteer@mlai.au" }];
   assert.equal(wb.assigneeFor({ assignees: ["plane-volunteer"] }), "linear-volunteer");
 });
+test("Plane issue created during baseline is left for the next writeback run", async () => {
+  const { wb, engine } = fixture();
+  const newId = "66e9aba5-51b2-4fa5-83c5-423b1223ed85";
+  await wb.issue(project, { ...row, id: newId, created_at: "2026-09-29T02:00:00Z" }, true);
+  assert.equal(wb.reverse.issues[newId], undefined);
+  assert.equal(engine.report.creates, 0);
+});

@@ -85,6 +85,8 @@ export class Writeback {
     if (mapping && !this.e.data.issues[id]) return; // Preservation records are not Linear issues.
     const previous = this.reverse.issues[row.id];
     if (bootstrapping) {
+      // An issue created after the baseline started is new work, not history.
+      if (!id && Date.parse(row.created_at) >= Date.parse(this.reverse.cutover)) return;
       this.reverse.issues[row.id] = { plane: snapshot(row), linear: id ? sourceFields(this.e.data.issues[id]) : null };
       if (id) {
         const map = this.state.issues[id];
