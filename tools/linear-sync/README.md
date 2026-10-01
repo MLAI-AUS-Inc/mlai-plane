@@ -48,9 +48,10 @@ private API origin and import namespace are fixed in `config.mjs`.
 ## Plane → Linear writeback (opt-in)
 
 `ENABLE_LINEAR_WRITEBACK=true` enables writes from Plane to Linear on the same
-thirty-minute run. Set a separate `LINEAR_WRITE_API_KEY` in the private runtime
-environment before using `--apply`; the existing `LINEAR_API_KEY` remains
-read-only. Leave the flag unset to keep the deployed one-way behavior.
+thirty-minute run. The existing `LINEAR_API_KEY` is used for writes when the flag is enabled; it
+was verified write-capable on an MLAI Tech issue. You can supply a separate
+`LINEAR_WRITE_API_KEY` to use a different account or narrower key. Leave the
+flag unset to keep the deployed one-way behavior.
 
 The first enabled apply records the current Plane issue baseline and makes no
 Linear changes. Later runs create new Plane work items in **mapped Linear
