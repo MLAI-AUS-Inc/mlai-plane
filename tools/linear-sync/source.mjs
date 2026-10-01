@@ -44,6 +44,12 @@ export class Linear {
     }
     throw Error("Linear read retry limit");
   }
+  async issue(id) {
+    return (await this.query(`query SyncIssue($id: String!) { issue(id: $id) { ${selections.issues} } }`, { id })).issue;
+  }
+  async comment(id) {
+    return (await this.query(`query SyncComment($id: String!) { comment(id: $id) { ${selections.comments} } }`, { id })).comment;
+  }
   async identity() {
     const d = await this.query("query SyncIdentity { organization { id } }");
     if (d.organization.id !== SOURCE_ID) throw Error("Wrong Linear workspace");

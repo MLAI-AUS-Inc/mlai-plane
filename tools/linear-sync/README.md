@@ -1,7 +1,7 @@
-# One-way MLAI Linear → Plane sync
+# MLAI Linear ↔ Plane sync
 
 This is a separate Node 22 process, not a Plane plugin or database migration.
-Linear is permanently read-only. The source organization, Plane workspace,
+Linear writes are opt-in; a separate credential is optional. The source organization, Plane workspace,
 private API origin and import namespace are fixed in `config.mjs`.
 
 ## Local verification (8 September 2026)
@@ -45,6 +45,34 @@ private API origin and import namespace are fixed in `config.mjs`.
   enabled at minute 00 and 30. Verify subsequent runs with `systemctl status
   mlai-plane-sync.service` and the private `last-report.json`.
 
+## Plane → Linear writeback (opt-in)
+
+`ENABLE_LINEAR_WRITEBACK=true` enables writes from Plane to Linear on the same
+thirty-minute run. The existing `LINEAR_API_KEY` is used for writes when the flag is enabled; it
+was verified write-capable on an MLAI Tech issue. You can supply a separate
+`LINEAR_WRITE_API_KEY` to use a different account or narrower key. Leave the
+flag unset to keep the deployed one-way behavior.
+
+The first enabled apply records the current Plane issue baseline and makes no
+Linear changes. Later runs create new Plane work items in **mapped Linear
+projects**, and synchronize changes to title, description, status, priority,
+due date, labels, assignee, and issue comments. New Plane projects, attachments,
+cycles, parent changes, archive changes, and deletes are not written to Linear.
+For projects linked to several Linear teams, new issues use the MLAI Tech team
+when present; if the status or label cannot be mapped uniquely, the issue is
+left as a conflict for review.
+
+Writes use the Plane UUID as the Linear issue/comment UUID so an uncertain
+response can be checked before retrying. The sync re-reads both records before
+updating and stops if the same field changed in both systems. The first baseline
+excludes older Plane edits from writeback. The selected key acts as its owner in Linear; the sync does not
+impersonate volunteer accounts.
+
+Before enabling it on the cloud host, back up the live checkpoint, run a dry
+run with the flag enabled, and inspect the private report. Then run an apply
+once to establish the baseline. Do not start a
+second writer from a copy of the checkpoint. No database migration is needed.
+
 ## Scope and safety
 
 - Poll changed projects, issues, comments, attachment records, cycles, documents,
@@ -53,8 +81,8 @@ private API origin and import namespace are fixed in `config.mjs`.
 - Reuse the September 2026 import UUID mappings. Do not re-import the workspace.
 - Create new projects/issues/comments and update supported issue fields and
   comment content. Source authors are attribution, not impersonated accounts.
-- Only the already-authenticated Plane user's matching active Linear identity
-  is assigned natively. No account creation, invitations or Linear changes.
+- Active Linear assignees with a unique matching Plane workspace email are
+  assigned natively. No account creation or invitations.
 - Same-project parents use native relationships; cross-project parents use links.
   New supported relationships are added, never automatically removed.
 - Copy new Linear-hosted non-video files up to 5 MiB and verify their downloaded
@@ -72,8 +100,7 @@ private API origin and import namespace are fixed in `config.mjs`.
   retried; they do not disappear when the polling watermark advances.
 - Re-read before PATCH and verify afterwards. Plane's API has no conditional
   PATCH/ETag in this deployment: simultaneous edits in the tiny read/write window
-  cannot be made fully atomic. Treat Linear as the source of truth for imported
-  records; use Plane-only records for independent work.
+  cannot be made fully atomic. Conflicting edits to the same supported field require review.
 - An explicit file lock prevents overlap on one shared state directory. Never
   run local and DigitalOcean writers concurrently with separate copies of state.
 - Dry runs have no Plane write capability and do not advance checkpoints.
@@ -132,7 +159,13 @@ Stop before deploying a cloud writer:
 
 ```sh
 launchctl bootout gui/$(id -u)/au.mlai.plane.linear-sync
+launchctl disable gui/$(id -u)/au.mlai.plane.linear-sync
 ```
+
+Disable the LaunchAgent as well as stopping it so a later login does not
+restart a second writer against the cloud checkpoint. Verify with
+`launchctl print-disabled gui/$(id -u)`. Re-enable only during a deliberate
+cutback to the Mac, after stopping the cloud timer.
 
 Wait for any running sync to finish; inspect `run.lock` and its PID. Do not remove
 a lock merely because it is old. After a confirmed process crash, an operator

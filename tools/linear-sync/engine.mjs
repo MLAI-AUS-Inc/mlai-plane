@@ -124,7 +124,7 @@ export class Engine {
           collection + "?external_id=" + encodeURIComponent(sourceId) + "&external_source=" + NAMESPACE
         );
     }
-    if (map && (!current || current.external_id !== sourceId || current.external_source !== NAMESPACE))
+    if (map && (!current || (!map.origin && (current.external_id !== sourceId || current.external_source !== NAMESPACE))))
       throw new Conflict("Mapped destination was removed or changed identity");
     if (current && !map) {
       if (!this.state.intents[intentKey]) throw new Conflict("Uncheckpointed source ID already exists");
@@ -254,11 +254,11 @@ export class Engine {
       this
     );
     const assignee = this.data.users[source.assignee?.id];
-    const assigned =
-      assignee?.active && assignee.email?.toLowerCase() === this.me.email.toLowerCase() ? [this.me.id] : [];
+    const matches = assignee?.active ? this.members.filter((m) => m.email?.toLowerCase() === assignee.email?.toLowerCase()) : [];
+    const assigned = matches.length === 1 ? [matches[0].id] : [];
     const desired = {
-      name: `[${source.identifier}] ${source.title}`.slice(0, 255).trim(),
-      description_html: issueBody(source, this.data, this.state),
+      name: (mapped?.sourceTitle === source.title ? mapped.last.name : mapped?.origin === "plane" ? source.title : `[${source.identifier}] ${source.title}`).slice(0, 255).trim(),
+      description_html: mapped?.sourceDescription === (source.description ?? "") ? mapped.last.description_html : mapped?.origin === "plane" ? render(source.description, this.state.files) : issueBody(source, this.data, this.state),
       state: await this.stateFor(source, p.id),
       parent: parentId,
       priority: { 0: "none", 1: "urgent", 2: "high", 3: "medium", 4: "low" }[source.priority],
@@ -266,9 +266,21 @@ export class Engine {
       archived_at: source.archivedAt?.slice(0, 10) ?? null,
       labels: await this.labelsFor(source, p.id),
       assignees: assigned,
-      created_at: source.createdAt,
+      created_at: mapped?.origin === "plane" ? mapped.last.created_at : source.createdAt,
     };
+    const before = mapped ? { ...mapped.last } : null;
     const result = await this.upsert("issue", source.id, p.id, desired);
+    const reverse = this.state.reverse?.issues?.[result.id];
+    if (this.apply && reverse && before) {
+      for (const field of Object.keys(reverse.plane))
+        if (!equal(field, desired[field], before[field]) && equal(field, reverse.plane[field], before[field]))
+          reverse.plane[field] = desired[field];
+      reverse.linear = { title: source.title, description: source.description ?? "", stateId: source.state?.id ?? null,
+        priority: source.priority, dueDate: source.dueDate ?? null, labelIds: [...(source.labelIds ?? [])].sort(),
+        assigneeId: source.assignee?.id ?? null };
+      this.save();
+    }
+    if (this.apply) { result.sourceTitle = source.title; result.sourceDescription = source.description ?? ""; this.save(); }
     await this.cycle(source, p.id, result.id);
     return result;
   }
@@ -447,13 +459,21 @@ export class Engine {
       const key = Object.keys(this.state.projects).find((k) => this.state.projects[k].id === issue.project);
       await this.project(key);
       await copyFiles(source.body, this);
-      return this.upsert(
+      const previous = this.state.comments[source.id] ? { ...this.state.comments[source.id].last } : null;
+      const result = await this.upsert(
         "comment",
         source.id,
         issue.project,
-        { comment_html: commentBody(source, this.data, this.state), created_at: source.createdAt },
+        { comment_html: this.state.comments[source.id]?.sourceBody === source.body ? this.state.comments[source.id].last.comment_html : this.state.comments[source.id]?.origin === "plane" ? render(source.body, this.state.files) : commentBody(source, this.data, this.state), created_at: source.createdAt },
         { issueId: issue.id }
       );
+      const reverse = this.state.reverse?.comments?.[result.id];
+      if (this.apply && reverse && previous && !equal("comment_html", result.last.comment_html, previous.comment_html) &&
+          equal("comment_html", reverse.html, previous.comment_html)) {
+        reverse.html = result.last.comment_html; reverse.body = source.body; this.save();
+      }
+      if (this.apply) { result.sourceBody = source.body; this.save(); }
+      return result;
     }
     if (root === "attachments") return; // Its parent issue is queued while collecting deltas.
     if (["teams", "users", "externalUsers"].includes(root)) return;
@@ -498,6 +518,7 @@ export class Engine {
     await this.linear.identity();
     this.me = await this.plane.request("GET", "/api/v1/users/me/");
     if (!this.me?.id || !this.me.email) throw Error("Plane authentication failed");
+    this.members = await this.plane.list("/api/v1/workspaces/mlai/members/");
     await this.project("archive");
     const since = new Date(Date.parse(this.state.watermark) - 5 * 60 * 1000).toISOString();
     const daily =
