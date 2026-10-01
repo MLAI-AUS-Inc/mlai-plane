@@ -27,6 +27,7 @@ from plane.bgtasks.forgot_password_task import forgot_password
 from plane.license.models import Instance
 from plane.db.models import User
 from plane.license.utils.instance_value import get_configuration_value
+from plane.utils.cloudflare_email import email_is_configured
 from plane.authentication.utils.host import base_host
 from plane.authentication.adapter.error import (
     AuthenticationException,
@@ -59,21 +60,9 @@ class ForgotPasswordSpaceEndpoint(APIView):
             )
             return Response(exc.get_error_dict(), status=status.HTTP_400_BAD_REQUEST)
 
-        (EMAIL_HOST, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD) = get_configuration_value(
-            [
-                {"key": "EMAIL_HOST", "default": os.environ.get("EMAIL_HOST")},
-                {
-                    "key": "EMAIL_HOST_USER",
-                    "default": os.environ.get("EMAIL_HOST_USER"),
-                },
-                {
-                    "key": "EMAIL_HOST_PASSWORD",
-                    "default": os.environ.get("EMAIL_HOST_PASSWORD"),
-                },
-            ]
-        )
+        (EMAIL_HOST,) = get_configuration_value([{"key": "EMAIL_HOST", "default": os.environ.get("EMAIL_HOST")}])
 
-        if not (EMAIL_HOST):
+        if not email_is_configured(EMAIL_HOST):
             exc = AuthenticationException(
                 error_message="SMTP_NOT_CONFIGURED",
                 error_code=AUTHENTICATION_ERROR_CODES["SMTP_NOT_CONFIGURED"],

@@ -24,6 +24,7 @@ from plane.authentication.adapter.error import (
 )
 from plane.authentication.rate_limit import AuthenticationThrottle
 from plane.license.utils.instance_value import get_configuration_value
+from plane.utils.cloudflare_email import email_is_configured
 
 
 class EmailCheckEndpoint(APIView):
@@ -51,7 +52,7 @@ class EmailCheckEndpoint(APIView):
             ]
         )
 
-        smtp_configured = bool(EMAIL_HOST)
+        email_configured = email_is_configured(EMAIL_HOST)
         is_magic_login_enabled = ENABLE_MAGIC_LINK_LOGIN == "1"
 
         email = request.data.get("email", False)
@@ -87,7 +88,7 @@ class EmailCheckEndpoint(APIView):
                     "existing": True,
                     "status": (
                         "MAGIC_CODE"
-                        if existing_user.is_password_autoset and smtp_configured and is_magic_login_enabled
+                        if existing_user.is_password_autoset and email_configured and is_magic_login_enabled
                         else "CREDENTIAL"
                     ),
                 },
@@ -97,7 +98,7 @@ class EmailCheckEndpoint(APIView):
         return Response(
             {
                 "existing": False,
-                "status": ("MAGIC_CODE" if smtp_configured and is_magic_login_enabled else "CREDENTIAL"),
+                "status": ("MAGIC_CODE" if email_configured and is_magic_login_enabled else "CREDENTIAL"),
             },
             status=status.HTTP_200_OK,
         )
