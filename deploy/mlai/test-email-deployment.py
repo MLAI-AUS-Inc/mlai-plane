@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Copyright (c) 2023-present Plane Software, Inc. and contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+# See the LICENSE file for details.
+
 """Exercise the deploy renderer with fake secrets; no services, migrations, or network."""
 
 import os
