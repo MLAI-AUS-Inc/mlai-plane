@@ -5,6 +5,9 @@ a DigitalOcean Droplet behind the existing `mlai-plane-edge` Cloudflare Worker
 and a named Cloudflare Tunnel. It does not expose Plane directly on ports 80 or
 443.
 
+The [August v1.4 local rehearsal](../../docs/mlai-v1.4-local-rehearsal-2026-08-01.md)
+is retained as a dated historical record. Use this profile for current operations.
+
 ## Ownership boundary
 
 | Concern | Owner |
